@@ -62,13 +62,24 @@ Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required.
            ├── Config/
            └── UnrealClaude.uplugin
    ```
-3. Launch the editor - the plugin will load automatically
+3. **Install MCP Bridge dependencies** (required for Blueprint tools and editor integration):
+   ```bash
+   cd YourProject/Plugins/UnrealClaude/Resources/mcp-bridge
+   npm install
+   ```
+4. Launch the editor - the plugin will load automatically
 
 ### Option B: Engine Plugin (All Projects)
 
 Copy to your engine's plugins folder:
 ```
 C:\Program Files\Epic Games\UE_5.7\Engine\Plugins\Marketplace\UnrealClaude\
+```
+
+Then install the MCP bridge dependencies:
+```bash
+cd "C:\Program Files\Epic Games\UE_5.7\Engine\Plugins\Marketplace\UnrealClaude\Resources\mcp-bridge"
+npm install
 ```
 
 ### Building from Source
@@ -162,7 +173,7 @@ All modifications auto-compile the Blueprint after changes.
 | `capture_viewport` | Capture viewport screenshot |
 | `execute_script` | Execute Python/BP scripts with permission |
 
-The MCP server runs on port 8080 by default. See `.mcp.json` for configuration.
+The MCP server runs on port 3000 by default and starts automatically when the editor loads.
 
 ## Configuration
 
@@ -233,7 +244,29 @@ Ensure you're on Unreal Engine 5.7 for Windows. This plugin uses Windows-specifi
 
 ### MCP Server not starting
 
-Check if port 8080 is available. The MCP server logs to `LogUnrealClaude`.
+Check if port 3000 is available. The MCP server logs to `LogUnrealClaude`.
+
+### MCP tools not available / Blueprint tools not working
+
+If Claude says the MCP tools are in its instructions but not in its function list:
+
+1. **Install MCP bridge dependencies**: The most common cause is missing npm packages:
+   ```bash
+   cd YourProject/Plugins/UnrealClaude/Resources/mcp-bridge
+   npm install
+   ```
+
+2. **Verify the HTTP server is running**: With the editor open, test:
+   ```bash
+   curl http://localhost:3000/mcp/status
+   ```
+   You should see a JSON response with project info.
+
+3. **Check the Output Log**: Look for `LogUnrealClaude` messages:
+   - `MCP Server started on http://localhost:3000` - Server is running
+   - `Registered X MCP tools` - Tools are loaded
+
+4. **Restart the editor**: After installing npm dependencies, restart Unreal Editor.
 
 ## Architecture
 
