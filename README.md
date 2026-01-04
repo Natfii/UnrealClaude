@@ -16,7 +16,7 @@ UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs
 - **MCP Server** - Model Context Protocol server for external tool integration
 - **Script Execution** - Claude can write, compile (via Live Coding), and execute scripts with your permission
 - **Session Persistence** - Conversation history saved across editor sessions
-- **Project-Aware** - Automatically gathers project context (modules, plugins, assets)
+- **Project-Aware** - Automatically gathers project context (modules, plugins, assets) and is able to see editor viewports 
 - **Uses Claude Code Auth** - No separate API key management needed
 
 ## Prerequisites
