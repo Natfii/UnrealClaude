@@ -1,0 +1,148 @@
+# Unreal Engine 5.7 Project
+
+This is an Unreal Engine 5.7 C++ project. When providing assistance, follow these guidelines.
+
+## Unreal Engine 5.7 Key APIs
+
+### Modern Practices (Use These)
+- `TObjectPtr<>` for object pointers in headers
+- Enhanced Input System (not legacy input)
+- Gameplay Ability System (GAS) for complex abilities
+- Common UI for cross-platform interfaces
+- World Partition for large worlds
+- Chaos physics (default physics engine)
+- Niagara for VFX (not Cascade)
+- MetaSounds for procedural audio
+- Control Rig for animation
+
+### Deprecated (Avoid)
+- Raw `UObject*` in UPROPERTY headers (use TObjectPtr)
+- Legacy Input (BindAction/BindAxis)
+- Matinee (use Sequencer)
+- PhysX references
+- Cascade particle system
+
+## C++ Coding Standards
+
+### Naming Conventions
+- `F` prefix: Structs (FVector, FTransform, FMyStruct)
+- `U` prefix: UObject classes (UActorComponent, UMyComponent)
+- `A` prefix: Actor classes (AActor, ACharacter, AMyActor)
+- `E` prefix: Enums (ECollisionChannel, EMyEnum)
+- `I` prefix: Interfaces (IInterface)
+- `T` prefix: Templates (TArray, TMap, TSharedPtr)
+
+### UPROPERTY Specifiers
+```cpp
+// Editable in Details panel and Blueprints
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "My Category")
+float MyValue;
+
+// Only visible, not editable
+UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+int32 CurrentHealth;
+
+// Only in C++, not exposed to editor/BP
+UPROPERTY()
+TObjectPtr<USceneComponent> RootComp;
+
+// Replicated property
+UPROPERTY(Replicated, BlueprintReadOnly)
+bool bIsActive;
+```
+
+### UFUNCTION Specifiers
+```cpp
+// Callable from Blueprints
+UFUNCTION(BlueprintCallable, Category = "Combat")
+void Attack();
+
+// Pure function (no side effects, used in BP expressions)
+UFUNCTION(BlueprintPure, Category = "Stats")
+float GetHealthPercent() const;
+
+// Event that can be implemented in Blueprint
+UFUNCTION(BlueprintImplementableEvent, Category = "Events")
+void OnDeath();
+
+// Native event with default C++ implementation
+UFUNCTION(BlueprintNativeEvent, Category = "Events")
+void OnDamageReceived(float Damage);
+
+// Server RPC
+UFUNCTION(Server, Reliable)
+void ServerDoAction();
+
+// Multicast RPC
+UFUNCTION(NetMulticast, Unreliable)
+void MulticastPlayEffect();
+```
+
+### Header Template
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "MyActor.generated.h"
+
+UCLASS()
+class MYPROJECT_API AMyActor : public AActor
+{
+    GENERATED_BODY()
+    
+public:
+    AMyActor();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config")
+    float ConfigValue = 100.f;
+
+private:
+    UPROPERTY()
+    TObjectPtr<USceneComponent> SceneRoot;
+};
+```
+
+## Build Commands
+
+```bash
+# Build from command line
+"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" MyProjectEditor Win64 Development "C:\Projects\MyProject\MyProject.uproject" -WaitMutex
+
+# Cook content
+"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "C:\Projects\MyProject\MyProject.uproject" -run=cook -targetplatform=Windows
+
+# Generate project files
+"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" -projectfiles -project="C:\Projects\MyProject\MyProject.uproject" -game -rocket -progress
+```
+
+## Common File Locations
+
+- Source code: `Source/[ProjectName]/`
+- Public headers: `Source/[ProjectName]/Public/`
+- Private implementation: `Source/[ProjectName]/Private/`
+- Build config: `Source/[ProjectName]/[ProjectName].Build.cs`
+- Content: `Content/`
+- Config files: `Config/`
+- Plugins: `Plugins/`
+
+## Response Guidelines
+
+When providing code:
+1. Always include necessary #include statements
+2. Show both .h and .cpp for class implementations
+3. Use modern UE5.7 APIs (not deprecated ones)
+4. Follow naming conventions strictly
+5. Include GENERATED_BODY() macro
+6. Use forward declarations in headers when possible
+7. Specify the correct UPROPERTY/UFUNCTION specifiers
+
+When explaining:
+1. Reference official UE5.7 documentation when relevant
+2. Warn about common pitfalls (circular dependencies, GC issues)
+3. Mention Blueprint integration where applicable
+4. Note multiplayer considerations if relevant

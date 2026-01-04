@@ -1,0 +1,29 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "Unreal Claude",
+	"Description": "Claude Code CLI integration for Unreal Engine 5.7. Get AI coding assistance with built-in UE5.7 documentation context directly in the editor. Windows only.",
+	"Category": "Editor",
+	"CreatedBy": "Natali Caggiano",
+	"CreatedByURL": "https://github.com/Natfii",
+	"DocsURL": "https://github.com/Natfii/UnrealClaude",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/Natfii/UnrealClaude/issues",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"SupportedTargetPlatforms": [
+		"Win64"
+	],
+	"Modules": [
+		{
+			"Name": "UnrealClaude",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	]
+}
