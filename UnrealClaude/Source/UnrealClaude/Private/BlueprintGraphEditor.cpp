@@ -33,7 +33,8 @@ UEdGraph* FBlueprintGraphEditor::FindGraph(
 		return nullptr;
 	}
 
-	TArray<UEdGraph*>& Graphs = bFunctionGraph ? Blueprint->FunctionGraphs : Blueprint->UbergraphPages;
+	// Get the appropriate graph array (UE 5.7 uses TObjectPtr)
+	auto& Graphs = bFunctionGraph ? Blueprint->FunctionGraphs : Blueprint->UbergraphPages;
 
 	// If no name specified, return the first graph (default)
 	if (GraphName.IsEmpty())

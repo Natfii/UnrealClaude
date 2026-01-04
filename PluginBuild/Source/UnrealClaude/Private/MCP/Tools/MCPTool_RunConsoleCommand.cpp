@@ -16,18 +16,16 @@ FMCPToolResult FMCPTool_RunConsoleCommand::Execute(const TSharedRef<FJsonObject>
 		return Error.GetValue();
 	}
 
-	// Get command
+	// Extract and validate command using base class helpers
 	FString Command;
-	if (!Params->TryGetStringField(TEXT("command"), Command))
+	TOptional<FMCPToolResult> ParamError;
+	if (!ExtractRequiredString(Params, TEXT("command"), Command, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: command"));
+		return ParamError.GetValue();
 	}
-
-	// Validate command using centralized validator
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateConsoleCommand(Command, ValidationError))
+	if (!ValidateConsoleCommandParam(Command, ParamError))
 	{
-		return FMCPToolResult::Error(ValidationError);
+		return ParamError.GetValue();
 	}
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Executing console command: %s"), *Command);

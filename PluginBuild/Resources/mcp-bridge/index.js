@@ -4,7 +4,11 @@
  * UnrealClaude MCP Bridge
  *
  * This bridges Claude Code's MCP protocol to the UnrealClaude plugin's HTTP REST API.
- * The plugin runs an HTTP server on localhost:3000 with editor manipulation tools.
+ * The plugin runs an HTTP server on localhost (default port 3000) with editor manipulation tools.
+ *
+ * Environment Variables:
+ *   UNREAL_MCP_URL - Base URL for Unreal MCP server (default: http://localhost:3000)
+ *   MCP_REQUEST_TIMEOUT_MS - HTTP request timeout in milliseconds (default: 30000)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,21 +18,56 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-const UNREAL_MCP_URL = process.env.UNREAL_MCP_URL || "http://localhost:3000";
+// Configuration with defaults
+const CONFIG = {
+  unrealMcpUrl: process.env.UNREAL_MCP_URL || "http://localhost:3000",
+  requestTimeoutMs: parseInt(process.env.MCP_REQUEST_TIMEOUT_MS, 10) || 30000,
+};
+
+/**
+ * Structured logging helper - writes to stderr to not interfere with MCP protocol
+ */
+const log = {
+  info: (msg, data) => console.error(`[INFO] ${msg}`, data ? JSON.stringify(data) : ""),
+  error: (msg, data) => console.error(`[ERROR] ${msg}`, data ? JSON.stringify(data) : ""),
+  debug: (msg, data) => process.env.DEBUG && console.error(`[DEBUG] ${msg}`, data ? JSON.stringify(data) : ""),
+};
+
+/**
+ * Fetch with timeout using AbortController
+ */
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CONFIG.requestTimeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Fetch tools from the UnrealClaude HTTP server
  */
 async function fetchUnrealTools() {
   try {
-    const response = await fetch(`${UNREAL_MCP_URL}/mcp/tools`);
+    const response = await fetchWithTimeout(`${CONFIG.unrealMcpUrl}/mcp/tools`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     const data = await response.json();
     return data.tools || [];
   } catch (error) {
-    console.error("Failed to fetch tools from Unreal:", error.message);
+    if (error.name === "AbortError") {
+      log.error("Request timeout fetching tools", { url: `${CONFIG.unrealMcpUrl}/mcp/tools` });
+    } else {
+      log.error("Failed to fetch tools from Unreal", { error: error.message });
+    }
     return [];
   }
 }
@@ -37,8 +76,9 @@ async function fetchUnrealTools() {
  * Execute a tool via the UnrealClaude HTTP server
  */
 async function executeUnrealTool(toolName, args) {
+  const url = `${CONFIG.unrealMcpUrl}/mcp/tool/${toolName}`;
   try {
-    const response = await fetch(`${UNREAL_MCP_URL}/mcp/tool/${toolName}`, {
+    const response = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -47,11 +87,16 @@ async function executeUnrealTool(toolName, args) {
     });
 
     const data = await response.json();
+    log.debug("Tool executed", { tool: toolName, success: data.success });
     return data;
   } catch (error) {
+    const errorMessage = error.name === "AbortError"
+      ? `Request timeout after ${CONFIG.requestTimeoutMs}ms`
+      : error.message;
+    log.error("Tool execution failed", { tool: toolName, error: errorMessage });
     return {
       success: false,
-      message: `Failed to execute tool: ${error.message}`,
+      message: `Failed to execute tool: ${errorMessage}`,
     };
   }
 }
@@ -61,14 +106,15 @@ async function executeUnrealTool(toolName, args) {
  */
 async function checkUnrealConnection() {
   try {
-    const response = await fetch(`${UNREAL_MCP_URL}/mcp/status`);
+    const response = await fetchWithTimeout(`${CONFIG.unrealMcpUrl}/mcp/status`);
     if (response.ok) {
       const data = await response.json();
       return { connected: true, ...data };
     }
-    return { connected: false };
-  } catch {
-    return { connected: false };
+    return { connected: false, reason: `HTTP ${response.status}` };
+  } catch (error) {
+    const reason = error.name === "AbortError" ? "timeout" : error.message;
+    return { connected: false, reason };
   }
 }
 
@@ -88,7 +134,7 @@ function convertToMCPSchema(unrealParams) {
       description: param.description,
     };
 
-    if (param.default) {
+    if (param.default !== undefined) {
       prop.default = param.default;
     }
 
@@ -110,7 +156,7 @@ function convertToMCPSchema(unrealParams) {
 const server = new Server(
   {
     name: "unrealclaude",
-    version: "1.0.0",
+    version: "1.1.0",
   },
   {
     capabilities: {
@@ -128,6 +174,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const status = await checkUnrealConnection();
 
   if (!status.connected) {
+    log.info("Unreal not connected", { reason: status.reason });
     // Return a status tool when not connected
     return {
       tools: [
@@ -164,6 +211,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
   });
 
+  log.info("Tools listed", { count: mcpTools.length, connected: true });
   return { tools: mcpTools };
 });
 
@@ -196,6 +244,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             type: "text",
             text: JSON.stringify({
               connected: false,
+              reason: status.reason,
               message: "Unreal Editor is not running or UnrealClaude plugin is not enabled. Please start Unreal Editor with the plugin.",
             }, null, 2),
           },
@@ -236,11 +285,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("UnrealClaude MCP Bridge started");
-  console.error(`Connecting to Unreal at: ${UNREAL_MCP_URL}`);
+  log.info("UnrealClaude MCP Bridge started", {
+    version: "1.1.0",
+    unrealUrl: CONFIG.unrealMcpUrl,
+    timeoutMs: CONFIG.requestTimeoutMs
+  });
 }
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  log.error("Fatal error", { error: error.message, stack: error.stack });
   process.exit(1);
 });

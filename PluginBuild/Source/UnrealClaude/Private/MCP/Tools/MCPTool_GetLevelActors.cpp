@@ -92,27 +92,19 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 			continue; // Keep counting but don't add more
 		}
 
-		// Build actor info
-		TSharedPtr<FJsonObject> ActorJson = MakeShared<FJsonObject>();
-		ActorJson->SetStringField(TEXT("name"), Actor->GetName());
-		ActorJson->SetStringField(TEXT("label"), Actor->GetActorLabel());
-		ActorJson->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
+		// Build actor info using base class helper
+		TSharedPtr<FJsonObject> ActorJson = BuildActorInfoWithTransformJson(Actor);
 		ActorJson->SetBoolField(TEXT("hidden"), Actor->IsHidden());
-
-		// Add transform using shared utilities
-		ActorJson->SetObjectField(TEXT("location"), UnrealClaudeJsonUtils::VectorToJson(Actor->GetActorLocation()));
-		ActorJson->SetObjectField(TEXT("rotation"), UnrealClaudeJsonUtils::RotatorToJson(Actor->GetActorRotation()));
-		ActorJson->SetObjectField(TEXT("scale"), UnrealClaudeJsonUtils::VectorToJson(Actor->GetActorScale3D()));
 
 		// Add tags if any
 		if (Actor->Tags.Num() > 0)
 		{
-			TArray<TSharedPtr<FJsonValue>> TagsArray;
+			TArray<FString> TagStrings;
 			for (const FName& Tag : Actor->Tags)
 			{
-				TagsArray.Add(MakeShared<FJsonValueString>(Tag.ToString()));
+				TagStrings.Add(Tag.ToString());
 			}
-			ActorJson->SetArrayField(TEXT("tags"), TagsArray);
+			ActorJson->SetArrayField(TEXT("tags"), StringArrayToJsonArray(TagStrings));
 		}
 
 		ActorsArray.Add(MakeShared<FJsonValueObject>(ActorJson));

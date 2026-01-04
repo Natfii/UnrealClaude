@@ -50,6 +50,7 @@ public class UnrealClaude : ModuleRules
 				"Kismet",
 				"KismetCompiler",
 				"BlueprintGraph",
+				"GraphEditor",
 				"AssetRegistry",
 				"AssetTools"
 			}

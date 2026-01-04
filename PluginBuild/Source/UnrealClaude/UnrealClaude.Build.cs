@@ -46,12 +46,13 @@ public class UnrealClaude : ModuleRules
 				"Sockets",
 				"Networking",
 				"ImageWrapper",
-				// Blueprint editing modules
-				"BlueprintGraph",
+				// Blueprint manipulation
 				"Kismet",
 				"KismetCompiler",
+				"BlueprintGraph",
 				"GraphEditor",
-				"AssetRegistry"
+				"AssetRegistry",
+				"AssetTools"
 			}
 		);
 
