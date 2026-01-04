@@ -1,6 +1,7 @@
 // Copyright Your Name. All Rights Reserved.
 
 #include "ScriptExecutionManager.h"
+#include "ScriptPermissionDialog.h"
 #include "UnrealClaudeModule.h"
 #include "UnrealClaudeUtils.h"
 #include "JsonUtils.h"
@@ -12,12 +13,6 @@
 #include "HAL/PlatformFileManager.h"
 #include "Editor.h"
 #include "Engine/World.h"
-#include "Widgets/SWindow.h"
-#include "Widgets/Text/STextBlock.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScrollBox.h"
-#include "Framework/Application/SlateApplication.h"
 
 // Live Coding support
 #if WITH_LIVE_CODING
@@ -96,113 +91,8 @@ bool FScriptExecutionManager::ShowPermissionDialog(
 	EScriptType Type,
 	const FString& Description)
 {
-	// Must be on game thread for Slate
-	if (!IsInGameThread())
-	{
-		UE_LOG(LogUnrealClaude, Error, TEXT("Permission dialog must be shown on game thread"));
-		return false;
-	}
-
-	// Use shared pointer for approval state to avoid stack variable capture issues
-	TSharedPtr<bool> bApprovedPtr = MakeShared<bool>(false);
-	TSharedPtr<SWindow> PermissionWindow;
-
-	// Truncate preview if too long
-	FString DisplayPreview = ScriptPreview;
-	if (DisplayPreview.Len() > 2000)
-	{
-		DisplayPreview = DisplayPreview.Left(2000) + TEXT("\n\n... (truncated)");
-	}
-
-	FString TypeStr = ScriptTypeToString(Type);
-
-	PermissionWindow = SNew(SWindow)
-		.Title(FText::FromString(FString::Printf(TEXT("Execute %s Script?"), *TypeStr.ToUpper())))
-		.ClientSize(FVector2D(700, 500))
-		.SupportsMaximize(false)
-		.SupportsMinimize(false);
-
-	TSharedRef<SVerticalBox> Content = SNew(SVerticalBox)
-		// Warning header
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(10)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(TEXT("⚠️ Claude wants to execute a script. Review the code below:")))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-		]
-		// Description
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(10, 0)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(FString::Printf(TEXT("Description: %s"), *Description)))
-			.AutoWrapText(true)
-		]
-		// Script preview in scrollbox
-		+ SVerticalBox::Slot()
-		.FillHeight(1.0f)
-		.Padding(10)
-		[
-			SNew(SBox)
-			.Padding(5)
-			[
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(DisplayPreview))
-					.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-					.AutoWrapText(false)
-				]
-			]
-		]
-		// Buttons
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.HAlign(HAlign_Right)
-		.Padding(10)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0, 0, 10, 0)
-			[
-				SNew(SButton)
-				.Text(FText::FromString(TEXT("Allow")))
-				.OnClicked_Lambda([bApprovedPtr, PermissionWindow]() {
-					*bApprovedPtr = true;
-					if (PermissionWindow.IsValid())
-					{
-						PermissionWindow->RequestDestroyWindow();
-					}
-					return FReply::Handled();
-				})
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			[
-				SNew(SButton)
-				.Text(FText::FromString(TEXT("Deny")))
-				.OnClicked_Lambda([bApprovedPtr, PermissionWindow]() {
-					*bApprovedPtr = false;
-					if (PermissionWindow.IsValid())
-					{
-						PermissionWindow->RequestDestroyWindow();
-					}
-					return FReply::Handled();
-				})
-			]
-		];
-
-	PermissionWindow->SetContent(Content);
-
-	// Show as modal
-	FSlateApplication::Get().AddModalWindow(PermissionWindow.ToSharedRef(), nullptr);
-
-	return *bApprovedPtr;
+	// Delegate to the extracted permission dialog class
+	return FScriptPermissionDialog::Show(ScriptPreview, Type, Description);
 }
 
 FScriptExecutionResult FScriptExecutionManager::ExecuteCpp(
@@ -348,19 +238,39 @@ FScriptExecutionResult FScriptExecutionManager::ExecutePython(
 	FStringOutputDevice OutputDevice;
 	GEditor->Exec(World, *Command, OutputDevice);
 
+	FString Output = OutputDevice.GetTrimmedOutput();
+
+	// Detect Python errors in output
+	bool bHasError = Output.Contains(TEXT("Traceback")) ||
+	                 Output.Contains(TEXT("Error:")) ||
+	                 Output.Contains(TEXT("SyntaxError")) ||
+	                 Output.Contains(TEXT("NameError")) ||
+	                 Output.Contains(TEXT("TypeError")) ||
+	                 Output.Contains(TEXT("ValueError")) ||
+	                 Output.Contains(TEXT("ImportError")) ||
+	                 Output.Contains(TEXT("AttributeError"));
+
 	// Add to history
 	FScriptHistoryEntry Entry;
 	Entry.ScriptType = EScriptType::Python;
 	Entry.Filename = ScriptName + TEXT(".py");
 	Entry.Description = Description;
-	Entry.bSuccess = true; // Assume success - Python errors would be in output
-	Entry.ResultMessage = OutputDevice.GetTrimmedOutput().Left(200);
+	Entry.bSuccess = !bHasError;
+	Entry.ResultMessage = Output.Left(200);
 	Entry.FilePath = FilePath;
 	AddToHistory(Entry);
 
+	if (bHasError)
+	{
+		return FScriptExecutionResult::Error(
+			TEXT("Python script execution failed"),
+			Output
+		);
+	}
+
 	return FScriptExecutionResult::Success(
 		TEXT("Python script executed"),
-		OutputDevice.GetTrimmedOutput()
+		Output
 	);
 }
 
@@ -482,18 +392,35 @@ FString FScriptExecutionManager::WriteScriptFile(
 
 FString FScriptExecutionManager::GenerateScriptName(EScriptType Type, const FString& Description)
 {
-	// Sanitize description for filename
-	FString BaseName = Description.Left(30);
-	BaseName = BaseName.Replace(TEXT(" "), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("/"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("\\"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT(":"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("*"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("?"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("\""), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("<"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT(">"), TEXT("_"));
-	BaseName = BaseName.Replace(TEXT("|"), TEXT("_"));
+	// Sanitize description for filename using single-pass character filtering
+	FString BaseName;
+	BaseName.Reserve(30);
+
+	// Invalid filename characters on Windows
+	static const TCHAR* InvalidChars = TEXT(" /\\:*?\"<>|");
+
+	int32 CharCount = 0;
+	for (TCHAR C : Description)
+	{
+		if (CharCount >= 30)
+		{
+			break;
+		}
+
+		// Replace invalid characters with underscore
+		bool bIsInvalid = false;
+		for (const TCHAR* InvalidChar = InvalidChars; *InvalidChar; ++InvalidChar)
+		{
+			if (C == *InvalidChar)
+			{
+				bIsInvalid = true;
+				break;
+			}
+		}
+
+		BaseName.AppendChar(bIsInvalid ? TEXT('_') : C);
+		CharCount++;
+	}
 
 	if (BaseName.IsEmpty())
 	{

@@ -74,21 +74,37 @@ void FMCPToolRegistry::UnregisterTool(const FString& ToolName)
 {
 	if (Tools.Remove(ToolName) > 0)
 	{
+		InvalidateToolCache();
 		UE_LOG(LogUnrealClaude, Log, TEXT("Unregistered tool: %s"), *ToolName);
 	}
 }
 
+void FMCPToolRegistry::InvalidateToolCache()
+{
+	bCacheValid = false;
+	CachedToolInfo.Empty();
+}
+
 TArray<FMCPToolInfo> FMCPToolRegistry::GetAllTools() const
 {
-	TArray<FMCPToolInfo> Result;
+	// Return cached result if valid
+	if (bCacheValid)
+	{
+		return CachedToolInfo;
+	}
+
+	// Rebuild cache
+	CachedToolInfo.Empty(Tools.Num());
 	for (const auto& Pair : Tools)
 	{
 		if (Pair.Value.IsValid())
 		{
-			Result.Add(Pair.Value->GetInfo());
+			CachedToolInfo.Add(Pair.Value->GetInfo());
 		}
 	}
-	return Result;
+	bCacheValid = true;
+
+	return CachedToolInfo;
 }
 
 FMCPToolResult FMCPToolRegistry::ExecuteTool(const FString& ToolName, const TSharedRef<FJsonObject>& Params)

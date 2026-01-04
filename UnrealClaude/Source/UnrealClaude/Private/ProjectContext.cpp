@@ -109,6 +109,89 @@ void FProjectContextManager::ScanSourceFiles()
 	}
 }
 
+int32 FProjectContextManager::SkipWhitespace(const FString& Content, int32 StartPos)
+{
+	int32 Pos = StartPos;
+	while (Pos < Content.Len() && FChar::IsWhitespace(Content[Pos]))
+	{
+		Pos++;
+	}
+	return Pos;
+}
+
+FString FProjectContextManager::ParseIdentifier(const FString& Content, int32 StartPos, int32& OutEndPos)
+{
+	int32 EndPos = StartPos;
+	while (EndPos < Content.Len() && (FChar::IsAlnum(Content[EndPos]) || Content[EndPos] == '_'))
+	{
+		EndPos++;
+	}
+	OutEndPos = EndPos;
+	return Content.Mid(StartPos, EndPos - StartPos);
+}
+
+bool FProjectContextManager::ParseSingleUClass(const FString& FileContent, const FString& RelativePath, int32 UClassPos, int32& OutNextSearchPos)
+{
+	// Find the class keyword after UCLASS(...)
+	int32 ClassPos = FileContent.Find(TEXT("class "), ESearchCase::CaseSensitive, ESearchDir::FromStart, UClassPos);
+	if (ClassPos == INDEX_NONE || ClassPos > UClassPos + 500)
+	{
+		OutNextSearchPos = UClassPos + 6;
+		return false;
+	}
+
+	// Parse first identifier after "class " (might be API macro)
+	int32 NameStart = ClassPos + 6;
+	int32 NameEnd;
+	FString FirstIdent = ParseIdentifier(FileContent, NameStart, NameEnd);
+
+	// Skip whitespace and get next identifier
+	NameStart = SkipWhitespace(FileContent, NameEnd);
+	int32 SecondEnd;
+	FString SecondIdent = ParseIdentifier(FileContent, NameStart, SecondEnd);
+
+	// Determine actual class name (handle API macro suffix)
+	FString ClassName;
+	int32 ClassNameEnd;
+	if (FirstIdent.EndsWith(TEXT("_API")) && !SecondIdent.IsEmpty())
+	{
+		ClassName = SecondIdent;
+		ClassNameEnd = SecondEnd;
+	}
+	else
+	{
+		ClassName = SecondIdent.IsEmpty() ? FirstIdent : SecondIdent;
+		ClassNameEnd = SecondIdent.IsEmpty() ? NameEnd : SecondEnd;
+	}
+
+	// Find parent class (after ": public ")
+	FString ParentClass;
+	int32 InheritPos = FileContent.Find(TEXT(": public "), ESearchCase::IgnoreCase, ESearchDir::FromStart, ClassNameEnd);
+	if (InheritPos != INDEX_NONE && InheritPos < ClassNameEnd + 50)
+	{
+		int32 ParentEnd;
+		ParentClass = ParseIdentifier(FileContent, InheritPos + 9, ParentEnd);
+	}
+
+	OutNextSearchPos = ClassPos + 6;
+
+	// Validate and store result
+	if (ClassName.IsEmpty() || ClassName.Len() <= 1)
+	{
+		return false;
+	}
+
+	FUClassInfo ClassInfo;
+	ClassInfo.ClassName = ClassName;
+	ClassInfo.ParentClass = ParentClass;
+	ClassInfo.FilePath = RelativePath;
+	ClassInfo.bIsBlueprint = false;
+	CachedContext.UClasses.Add(ClassInfo);
+	CachedContext.CppClassCount++;
+
+	return true;
+}
+
 void FProjectContextManager::ParseUClasses()
 {
 	// Scan header files for UCLASS declarations
@@ -121,14 +204,12 @@ void FProjectContextManager::ParseUClasses()
 
 		FString FullPath = FPaths::Combine(CachedContext.ProjectPath, RelativePath);
 		FString FileContent;
-
 		if (!FFileHelper::LoadFileToString(FileContent, *FullPath))
 		{
 			continue;
 		}
 
-		// Simple regex-like parsing for UCLASS declarations
-		// Looking for: UCLASS(...) followed by class ClassName : public ParentClass
+		// Find all UCLASS declarations in this file
 		int32 SearchStart = 0;
 		while (true)
 		{
@@ -138,80 +219,7 @@ void FProjectContextManager::ParseUClasses()
 				break;
 			}
 
-			// Find the class keyword after UCLASS(...)
-			int32 ClassPos = FileContent.Find(TEXT("class "), ESearchCase::CaseSensitive, ESearchDir::FromStart, UClassPos);
-			if (ClassPos == INDEX_NONE || ClassPos > UClassPos + 500) // Reasonable limit
-			{
-				SearchStart = UClassPos + 6;
-				continue;
-			}
-
-			// Find the class name (first identifier after "class ")
-			int32 NameStart = ClassPos + 6; // "class " length
-
-			// Skip API macro if present
-			while (NameStart < FileContent.Len() && (FChar::IsAlnum(FileContent[NameStart]) || FileContent[NameStart] == '_'))
-			{
-				NameStart++;
-			}
-			while (NameStart < FileContent.Len() && FChar::IsWhitespace(FileContent[NameStart]))
-			{
-				NameStart++;
-			}
-
-			// Now we should be at the actual class name
-			int32 NameEnd = NameStart;
-			while (NameEnd < FileContent.Len() && (FChar::IsAlnum(FileContent[NameEnd]) || FileContent[NameEnd] == '_'))
-			{
-				NameEnd++;
-			}
-
-			FString ClassName = FileContent.Mid(NameStart, NameEnd - NameStart);
-
-			// Skip if this is the API macro (ends with _API)
-			if (ClassName.EndsWith(TEXT("_API")))
-			{
-				// The real class name is next
-				int32 RealNameStart = NameEnd;
-				while (RealNameStart < FileContent.Len() && FChar::IsWhitespace(FileContent[RealNameStart]))
-				{
-					RealNameStart++;
-				}
-				int32 RealNameEnd = RealNameStart;
-				while (RealNameEnd < FileContent.Len() && (FChar::IsAlnum(FileContent[RealNameEnd]) || FileContent[RealNameEnd] == '_'))
-				{
-					RealNameEnd++;
-				}
-				ClassName = FileContent.Mid(RealNameStart, RealNameEnd - RealNameStart);
-				NameEnd = RealNameEnd;
-			}
-
-			// Find parent class (after " : public ")
-			FString ParentClass;
-			int32 InheritPos = FileContent.Find(TEXT(": public "), ESearchCase::IgnoreCase, ESearchDir::FromStart, NameEnd);
-			if (InheritPos != INDEX_NONE && InheritPos < NameEnd + 50)
-			{
-				int32 ParentStart = InheritPos + 9; // ": public " length
-				int32 ParentEnd = ParentStart;
-				while (ParentEnd < FileContent.Len() && (FChar::IsAlnum(FileContent[ParentEnd]) || FileContent[ParentEnd] == '_'))
-				{
-					ParentEnd++;
-				}
-				ParentClass = FileContent.Mid(ParentStart, ParentEnd - ParentStart);
-			}
-
-			if (!ClassName.IsEmpty() && ClassName.Len() > 1)
-			{
-				FUClassInfo ClassInfo;
-				ClassInfo.ClassName = ClassName;
-				ClassInfo.ParentClass = ParentClass;
-				ClassInfo.FilePath = RelativePath;
-				ClassInfo.bIsBlueprint = false;
-				CachedContext.UClasses.Add(ClassInfo);
-				CachedContext.CppClassCount++;
-			}
-
-			SearchStart = ClassPos + 6;
+			ParseSingleUClass(FileContent, RelativePath, UClassPos, SearchStart);
 		}
 	}
 }

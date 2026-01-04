@@ -441,48 +441,34 @@ void FClaudeCodeRunner::Exit()
 	bIsExecuting = false;
 }
 
-void FClaudeCodeRunner::ExecuteProcess()
-{
 #if PLATFORM_WINDOWS
-	FString ClaudePath = GetClaudePath();
-	FString CommandLine = BuildCommandLine(CurrentConfig);
-	
-	UE_LOG(LogUnrealClaude, Log, TEXT("Async executing Claude: %s %s"), *ClaudePath, *CommandLine);
-	
-	// Set working directory
-	FString WorkingDir = CurrentConfig.WorkingDirectory;
-	if (WorkingDir.IsEmpty())
-	{
-		WorkingDir = FPaths::ProjectDir();
-	}
-	
-	// Create pipes for stdout
+bool FClaudeCodeRunner::CreateProcessPipes()
+{
 	SECURITY_ATTRIBUTES SecurityAttributes;
 	SecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
 	SecurityAttributes.bInheritHandle = true;
 	SecurityAttributes.lpSecurityDescriptor = NULL;
-	
+
 	HANDLE StdOutReadPipe = NULL;
 	HANDLE StdOutWritePipe = NULL;
-	
+
 	if (!CreatePipe(&StdOutReadPipe, &StdOutWritePipe, &SecurityAttributes, 0))
 	{
-		// Copy delegate to avoid use-after-free
-		FOnClaudeResponse CompleteCopy = OnCompleteDelegate;
-		AsyncTask(ENamedThreads::GameThread, [CompleteCopy]()
-		{
-			CompleteCopy.ExecuteIfBound(TEXT("Failed to create pipe for Claude process"), false);
-		});
-		return;
+		return false;
 	}
-	
+
 	// Ensure read handle is not inherited
 	SetHandleInformation(StdOutReadPipe, HANDLE_FLAG_INHERIT, 0);
-	
+
 	ReadPipe = StdOutReadPipe;
 	WritePipe = StdOutWritePipe;
-	
-	// Setup process
+	return true;
+}
+
+bool FClaudeCodeRunner::LaunchProcess(const FString& FullCommand, const FString& WorkingDir)
+{
+	HANDLE StdOutWritePipe = static_cast<HANDLE>(WritePipe);
+
 	STARTUPINFOW StartupInfo;
 	ZeroMemory(&StartupInfo, sizeof(StartupInfo));
 	StartupInfo.cb = sizeof(StartupInfo);
@@ -490,14 +476,10 @@ void FClaudeCodeRunner::ExecuteProcess()
 	StartupInfo.hStdOutput = StdOutWritePipe;
 	StartupInfo.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
 	StartupInfo.wShowWindow = SW_HIDE;
-	
+
 	PROCESS_INFORMATION ProcessInfo;
 	ZeroMemory(&ProcessInfo, sizeof(ProcessInfo));
-	
-	// Build full command
-	FString FullCommand = FString::Printf(TEXT("\"%s\" %s"), *ClaudePath, *CommandLine);
-	
-	// Create process
+
 	BOOL bCreated = CreateProcessW(
 		NULL,
 		const_cast<LPWSTR>(*FullCommand),
@@ -510,50 +492,44 @@ void FClaudeCodeRunner::ExecuteProcess()
 		&StartupInfo,
 		&ProcessInfo
 	);
-	
+
 	if (!bCreated)
 	{
-		CloseHandle(StdOutReadPipe);
-		CloseHandle(StdOutWritePipe);
-		// Clear member variables to prevent double-close
-		ReadPipe = nullptr;
-		WritePipe = nullptr;
-
-		// Copy delegate to avoid use-after-free
-		FOnClaudeResponse CompleteCopy = OnCompleteDelegate;
-		AsyncTask(ENamedThreads::GameThread, [CompleteCopy]()
-		{
-			CompleteCopy.ExecuteIfBound(TEXT("Failed to start Claude process"), false);
-		});
-		return;
+		return false;
 	}
-	
+
 	ProcessHandle = ProcessInfo.hProcess;
 	CloseHandle(ProcessInfo.hThread);
 	CloseHandle(StdOutWritePipe);
 	WritePipe = nullptr;
-	
-	// Read output
+
+	return true;
+}
+
+FString FClaudeCodeRunner::ReadProcessOutput()
+{
 	FString FullOutput;
 	char Buffer[4096];
 	DWORD BytesRead;
-	
+
+	HANDLE StdOutReadPipe = static_cast<HANDLE>(ReadPipe);
+	HANDLE hProcess = static_cast<HANDLE>(ProcessHandle);
+
 	while (!StopTaskCounter.GetValue())
 	{
 		// Check if process is done
-		DWORD WaitResult = WaitForSingleObject(ProcessInfo.hProcess, 100);
-		
+		DWORD WaitResult = WaitForSingleObject(hProcess, 100);
+
 		// Read any available output
 		while (ReadFile(StdOutReadPipe, Buffer, sizeof(Buffer) - 1, &BytesRead, NULL) && BytesRead > 0)
 		{
 			Buffer[BytesRead] = '\0';
 			FString OutputChunk = UTF8_TO_TCHAR(Buffer);
 			FullOutput += OutputChunk;
-			
+
 			// Report progress
 			if (OnProgressDelegate.IsBound())
 			{
-				// Copy delegate and data to avoid use-after-free
 				FOnClaudeProgress ProgressCopy = OnProgressDelegate;
 				FString ProgressChunk = OutputChunk;
 				AsyncTask(ENamedThreads::GameThread, [ProgressCopy, ProgressChunk]()
@@ -562,7 +538,7 @@ void FClaudeCodeRunner::ExecuteProcess()
 				});
 			}
 		}
-		
+
 		if (WaitResult == WAIT_OBJECT_0)
 		{
 			// Process finished - read any remaining output
@@ -574,28 +550,82 @@ void FClaudeCodeRunner::ExecuteProcess()
 			break;
 		}
 	}
-	
-	// Get exit code
-	DWORD ExitCode;
-	GetExitCodeProcess(ProcessInfo.hProcess, &ExitCode);
-	
-	// Cleanup
-	CloseHandle(StdOutReadPipe);
-	CloseHandle(ProcessInfo.hProcess);
-	ReadPipe = nullptr;
-	ProcessHandle = nullptr;
-	
-	// Report completion on game thread
-	// Copy delegate and data to avoid use-after-free
-	bool bSuccess = (ExitCode == 0) && !StopTaskCounter.GetValue();
-	FString FinalOutput = FullOutput;
-	FOnClaudeResponse CompleteCopy = OnCompleteDelegate;
 
+	return FullOutput;
+}
+
+void FClaudeCodeRunner::ReportError(const FString& ErrorMessage)
+{
+	FOnClaudeResponse CompleteCopy = OnCompleteDelegate;
+	FString Message = ErrorMessage;
+	AsyncTask(ENamedThreads::GameThread, [CompleteCopy, Message]()
+	{
+		CompleteCopy.ExecuteIfBound(Message, false);
+	});
+}
+
+void FClaudeCodeRunner::ReportCompletion(const FString& Output, bool bSuccess)
+{
+	FOnClaudeResponse CompleteCopy = OnCompleteDelegate;
+	FString FinalOutput = Output;
 	AsyncTask(ENamedThreads::GameThread, [CompleteCopy, FinalOutput, bSuccess]()
 	{
 		CompleteCopy.ExecuteIfBound(FinalOutput, bSuccess);
 	});
-	
+}
+#endif // PLATFORM_WINDOWS
+
+void FClaudeCodeRunner::ExecuteProcess()
+{
+#if PLATFORM_WINDOWS
+	FString ClaudePath = GetClaudePath();
+	FString CommandLine = BuildCommandLine(CurrentConfig);
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("Async executing Claude: %s %s"), *ClaudePath, *CommandLine);
+
+	// Set working directory
+	FString WorkingDir = CurrentConfig.WorkingDirectory;
+	if (WorkingDir.IsEmpty())
+	{
+		WorkingDir = FPaths::ProjectDir();
+	}
+
+	// Create pipes for stdout capture
+	if (!CreateProcessPipes())
+	{
+		ReportError(TEXT("Failed to create pipe for Claude process"));
+		return;
+	}
+
+	// Build and launch the process
+	FString FullCommand = FString::Printf(TEXT("\"%s\" %s"), *ClaudePath, *CommandLine);
+	if (!LaunchProcess(FullCommand, WorkingDir))
+	{
+		CloseHandle(static_cast<HANDLE>(ReadPipe));
+		CloseHandle(static_cast<HANDLE>(WritePipe));
+		ReadPipe = nullptr;
+		WritePipe = nullptr;
+		ReportError(TEXT("Failed to start Claude process"));
+		return;
+	}
+
+	// Read output until process completes
+	FString FullOutput = ReadProcessOutput();
+
+	// Get exit code
+	DWORD ExitCode;
+	GetExitCodeProcess(static_cast<HANDLE>(ProcessHandle), &ExitCode);
+
+	// Cleanup handles
+	CloseHandle(static_cast<HANDLE>(ReadPipe));
+	CloseHandle(static_cast<HANDLE>(ProcessHandle));
+	ReadPipe = nullptr;
+	ProcessHandle = nullptr;
+
+	// Report completion
+	bool bSuccess = (ExitCode == 0) && !StopTaskCounter.GetValue();
+	ReportCompletion(FullOutput, bSuccess);
+
 #endif // PLATFORM_WINDOWS
 }
 

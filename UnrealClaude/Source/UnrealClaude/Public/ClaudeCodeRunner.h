@@ -47,6 +47,23 @@ private:
 	void ExecuteProcess();
 	void CleanupHandles();
 
+#if PLATFORM_WINDOWS
+	/** Create pipes for process stdout/stderr capture */
+	bool CreateProcessPipes();
+
+	/** Launch the Claude process with given command */
+	bool LaunchProcess(const FString& FullCommand, const FString& WorkingDir);
+
+	/** Read output from process until completion or cancellation */
+	FString ReadProcessOutput();
+
+	/** Report error to callback on game thread */
+	void ReportError(const FString& ErrorMessage);
+
+	/** Report completion to callback on game thread */
+	void ReportCompletion(const FString& Output, bool bSuccess);
+#endif
+
 	FClaudeRequestConfig CurrentConfig;
 	FOnClaudeResponse OnCompleteDelegate;
 	FOnClaudeProgress OnProgressDelegate;
