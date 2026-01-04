@@ -10,16 +10,11 @@
 
 FMCPToolResult FMCPTool_DeleteActors::Execute(const TSharedRef<FJsonObject>& Params)
 {
-	// Validate we're in editor
-	if (!GEditor)
+	// Validate editor context using base class
+	UWorld* World = nullptr;
+	if (auto Error = ValidateEditorContext(World))
 	{
-		return FMCPToolResult::Error(TEXT("Editor not available"));
-	}
-
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World)
-	{
-		return FMCPToolResult::Error(TEXT("No active world"));
+		return Error.GetValue();
 	}
 
 	// Collect actors to delete
@@ -38,17 +33,13 @@ FMCPToolResult FMCPTool_DeleteActors::Execute(const TSharedRef<FJsonObject>& Par
 			return FMCPToolResult::Error(ValidationError);
 		}
 
-		for (TActorIterator<AActor> It(World); It; ++It)
+		// Use base class helper to find actor
+		if (AActor* Actor = FindActorByNameOrLabel(World, SingleActorName))
 		{
-			AActor* Actor = *It;
-			if (Actor && (Actor->GetName() == SingleActorName || Actor->GetActorLabel() == SingleActorName))
-			{
-				ActorsToDelete.Add(Actor);
-				DeletedNames.Add(Actor->GetName());
-				break;
-			}
+			ActorsToDelete.Add(Actor);
+			DeletedNames.Add(Actor->GetName());
 		}
-		if (ActorsToDelete.Num() == 0)
+		else
 		{
 			NotFoundNames.Add(SingleActorName);
 		}
@@ -69,19 +60,13 @@ FMCPToolResult FMCPTool_DeleteActors::Execute(const TSharedRef<FJsonObject>& Par
 					return FMCPToolResult::Error(ValidationError);
 				}
 
-				bool bFound = false;
-				for (TActorIterator<AActor> It(World); It; ++It)
+				// Use base class helper to find actor
+				if (AActor* Actor = FindActorByNameOrLabel(World, ActorName))
 				{
-					AActor* Actor = *It;
-					if (Actor && (Actor->GetName() == ActorName || Actor->GetActorLabel() == ActorName))
-					{
-						ActorsToDelete.AddUnique(Actor);
-						DeletedNames.AddUnique(Actor->GetName());
-						bFound = true;
-						break;
-					}
+					ActorsToDelete.AddUnique(Actor);
+					DeletedNames.AddUnique(Actor->GetName());
 				}
-				if (!bFound)
+				else
 				{
 					NotFoundNames.Add(ActorName);
 				}
@@ -127,8 +112,8 @@ FMCPToolResult FMCPTool_DeleteActors::Execute(const TSharedRef<FJsonObject>& Par
 		}
 	}
 
-	// Mark dirty
-	World->MarkPackageDirty();
+	// Mark dirty using base class helper
+	MarkWorldDirty(World);
 
 	// Build result
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();

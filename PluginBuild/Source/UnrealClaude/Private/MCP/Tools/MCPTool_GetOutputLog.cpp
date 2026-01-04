@@ -2,17 +2,18 @@
 
 #include "MCPTool_GetOutputLog.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeConstants.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformFileManager.h"
 
 FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Params)
 {
-	// Get parameters
-	int32 NumLines = 100;
+	// Get parameters using centralized constants
+	int32 NumLines = UnrealClaudeConstants::MCPServer::DefaultOutputLogLines;
 	if (Params->HasField(TEXT("lines")))
 	{
-		NumLines = FMath::Clamp(static_cast<int32>(Params->GetNumberField(TEXT("lines"))), 1, 1000);
+		NumLines = FMath::Clamp(static_cast<int32>(Params->GetNumberField(TEXT("lines"))), 1, UnrealClaudeConstants::MCPServer::MaxOutputLogLines);
 	}
 
 	FString Filter;

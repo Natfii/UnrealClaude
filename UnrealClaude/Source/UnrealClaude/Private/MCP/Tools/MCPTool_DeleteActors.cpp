@@ -115,25 +115,14 @@ FMCPToolResult FMCPTool_DeleteActors::Execute(const TSharedRef<FJsonObject>& Par
 	// Mark dirty using base class helper
 	MarkWorldDirty(World);
 
-	// Build result
+	// Build result using base class helpers for JSON array construction
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-
-	TArray<TSharedPtr<FJsonValue>> DeletedArray;
-	for (const FString& Name : DeletedNames)
-	{
-		DeletedArray.Add(MakeShared<FJsonValueString>(Name));
-	}
-	ResultData->SetArrayField(TEXT("deleted"), DeletedArray);
+	ResultData->SetArrayField(TEXT("deleted"), StringArrayToJsonArray(DeletedNames));
 	ResultData->SetNumberField(TEXT("count"), DeletedNames.Num());
 
 	if (NotFoundNames.Num() > 0)
 	{
-		TArray<TSharedPtr<FJsonValue>> NotFoundArray;
-		for (const FString& Name : NotFoundNames)
-		{
-			NotFoundArray.Add(MakeShared<FJsonValueString>(Name));
-		}
-		ResultData->SetArrayField(TEXT("notFound"), NotFoundArray);
+		ResultData->SetArrayField(TEXT("notFound"), StringArrayToJsonArray(NotFoundNames));
 	}
 
 	return FMCPToolResult::Success(

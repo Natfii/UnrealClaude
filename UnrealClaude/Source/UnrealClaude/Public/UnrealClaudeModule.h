@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "UnrealClaudeConstants.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogUnrealClaude, Log, All);
 
@@ -25,8 +26,8 @@ public:
 	/** Get the MCP server instance */
 	TSharedPtr<FUnrealClaudeMCPServer> GetMCPServer() const { return MCPServer; }
 
-	/** Get MCP server port */
-	static constexpr uint32 GetMCPServerPort() { return 3000; }
+	/** Get MCP server port - uses centralized constant */
+	static constexpr uint32 GetMCPServerPort() { return UnrealClaudeConstants::MCPServer::DefaultPort; }
 
 private:
 	void RegisterMenus();

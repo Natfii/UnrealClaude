@@ -18,30 +18,23 @@ FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Para
 		return Error.GetValue();
 	}
 
-	// Get parameters
+	// Extract and validate actor name using base class helper
 	FString ActorName;
-	if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+	TOptional<FMCPToolResult> ParamError;
+	if (!ExtractActorName(Params, TEXT("actor_name"), ActorName, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: actor_name"));
+		return ParamError.GetValue();
 	}
 
-	// Validate actor name
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateActorName(ActorName, ValidationError))
-	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
+	// Extract and validate property path using base class helpers
 	FString PropertyPath;
-	if (!Params->TryGetStringField(TEXT("property"), PropertyPath))
+	if (!ExtractRequiredString(Params, TEXT("property"), PropertyPath, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: property"));
+		return ParamError.GetValue();
 	}
-
-	// Validate property path
-	if (!FMCPParamValidator::ValidatePropertyPath(PropertyPath, ValidationError))
+	if (!ValidatePropertyPathParam(PropertyPath, ParamError))
 	{
-		return FMCPToolResult::Error(ValidationError);
+		return ParamError.GetValue();
 	}
 
 	const TSharedPtr<FJsonValue>* ValuePtr = nullptr;
@@ -55,7 +48,7 @@ FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Para
 	AActor* Actor = FindActorByNameOrLabel(World, ActorName);
 	if (!Actor)
 	{
-		return FMCPToolResult::Error(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+		return ActorNotFoundError(ActorName);
 	}
 
 	// Set the property
@@ -253,6 +246,31 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 	return false;
 }
 
+/**
+ * Set a property value on an object using Unreal's reflection system.
+ *
+ * This function traverses a dot-separated property path (e.g., "Component.Transform.Location")
+ * and sets the final property to the provided JSON value. It supports:
+ *
+ * - Numeric types (int32, float, double, etc.)
+ * - Boolean properties
+ * - String and Name properties
+ * - Struct properties (FVector, FRotator, FLinearColor, etc.)
+ *
+ * Property path navigation:
+ * 1. Parse path into components (e.g., "Component.Location" -> ["Component", "Location"])
+ * 2. For each component, find the property on the current object
+ * 3. If property is an object reference, dereference and continue
+ * 4. Set the final property value using appropriate type handler
+ *
+ * Security: Property paths are validated by ValidatePropertyPath() before calling this.
+ *
+ * @param Object - The root object to start navigation from
+ * @param PropertyPath - Dot-separated path to the property (e.g., "Transform.Location.X")
+ * @param Value - JSON value to set (type must be compatible with property type)
+ * @param OutError - Error message if operation fails
+ * @return true if property was successfully set
+ */
 bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& PropertyPath, const TSharedPtr<FJsonValue>& Value, FString& OutError)
 {
 	if (!Object || !Value.IsValid())
@@ -261,7 +279,8 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 		return false;
 	}
 
-	// Parse property path and navigate to target
+	// Parse property path into components for traversal
+	// Example: "StaticMeshComponent.RelativeLocation.X" -> ["StaticMeshComponent", "RelativeLocation", "X"]
 	TArray<FString> PathParts;
 	PropertyPath.ParseIntoArray(PathParts, TEXT("."), true);
 

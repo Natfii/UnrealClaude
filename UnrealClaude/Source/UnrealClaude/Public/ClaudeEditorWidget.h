@@ -9,6 +9,7 @@
 class SMultiLineEditableTextBox;
 class SScrollBox;
 class SVerticalBox;
+class SClaudeInputArea;
 
 /**
  * Chat message display widget
@@ -82,25 +83,16 @@ private:
 	/** Get status color */
 	FSlateColor GetStatusColor() const;
 	
-	/** Input text changed */
-	void OnInputTextChanged(const FText& NewText);
-	
-	/** Input text committed (Enter pressed) */
-	void OnInputTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
-	
-	/** Handle key down in input box */
-	FReply OnInputKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent);
-
 private:
 	/** Chat message container */
 	TSharedPtr<SVerticalBox> ChatMessagesBox;
-	
+
 	/** Scroll box for chat */
 	TSharedPtr<SScrollBox> ChatScrollBox;
-	
-	/** Input text box */
-	TSharedPtr<SMultiLineEditableTextBox> InputTextBox;
-	
+
+	/** Input area widget */
+	TSharedPtr<SClaudeInputArea> InputArea;
+
 	/** Current input text */
 	FString CurrentInputText;
 	

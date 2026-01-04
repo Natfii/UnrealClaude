@@ -44,7 +44,14 @@ public class UnrealClaude : ModuleRules
 				"HTTP",
 				"HTTPServer",
 				"Sockets",
-				"Networking"
+				"Networking",
+				"ImageWrapper",
+				// Blueprint manipulation
+				"Kismet",
+				"KismetCompiler",
+				"BlueprintGraph",
+				"AssetRegistry",
+				"AssetTools"
 			}
 		);
 

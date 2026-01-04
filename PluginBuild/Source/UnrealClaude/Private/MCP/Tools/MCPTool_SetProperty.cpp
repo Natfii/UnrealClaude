@@ -11,16 +11,11 @@
 
 FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Params)
 {
-	// Validate we're in editor
-	if (!GEditor)
+	// Validate editor context using base class
+	UWorld* World = nullptr;
+	if (auto Error = ValidateEditorContext(World))
 	{
-		return FMCPToolResult::Error(TEXT("Editor not available"));
-	}
-
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World)
-	{
-		return FMCPToolResult::Error(TEXT("No active world"));
+		return Error.GetValue();
 	}
 
 	// Get parameters
@@ -56,8 +51,8 @@ FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Para
 	}
 	TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
 
-	// Find the actor
-	AActor* Actor = FindActorByName(World, ActorName);
+	// Find the actor using base class helper
+	AActor* Actor = FindActorByNameOrLabel(World, ActorName);
 	if (!Actor)
 	{
 		return FMCPToolResult::Error(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
@@ -70,9 +65,9 @@ FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Para
 		return FMCPToolResult::Error(ErrorMessage);
 	}
 
-	// Mark dirty
+	// Mark dirty using base class helper
 	Actor->MarkPackageDirty();
-	World->MarkPackageDirty();
+	MarkWorldDirty(World);
 
 	// Build result
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
@@ -85,17 +80,177 @@ FMCPToolResult FMCPTool_SetProperty::Execute(const TSharedRef<FJsonObject>& Para
 	);
 }
 
-AActor* FMCPTool_SetProperty::FindActorByName(UWorld* World, const FString& Name)
+bool FMCPTool_SetProperty::NavigateToProperty(
+	UObject* StartObject,
+	const TArray<FString>& PathParts,
+	UObject*& OutObject,
+	FProperty*& OutProperty,
+	FString& OutError)
 {
-	for (TActorIterator<AActor> It(World); It; ++It)
+	OutObject = StartObject;
+	OutProperty = nullptr;
+
+	for (int32 i = 0; i < PathParts.Num(); ++i)
 	{
-		AActor* Actor = *It;
-		if (Actor && (Actor->GetName() == Name || Actor->GetActorLabel() == Name))
+		const FString& PartName = PathParts[i];
+		const bool bIsLastPart = (i == PathParts.Num() - 1);
+
+		// Try to find the property
+		OutProperty = OutObject->GetClass()->FindPropertyByName(FName(*PartName));
+
+		if (!OutProperty)
 		{
-			return Actor;
+			// Try finding as component on actors
+			if (!TryNavigateToComponent(OutObject, PartName, bIsLastPart, OutError))
+			{
+				if (!OutError.IsEmpty())
+				{
+					return false;
+				}
+			}
+			else
+			{
+				OutProperty = nullptr;
+				continue;
+			}
+
+			if (bIsLastPart)
+			{
+				OutError = FString::Printf(TEXT("Property not found: %s on %s"), *PartName, *OutObject->GetClass()->GetName());
+				return false;
+			}
+			continue;
+		}
+
+		// If not the last part, navigate into nested object
+		if (!bIsLastPart)
+		{
+			if (!NavigateIntoNestedObject(OutObject, OutProperty, PartName, OutError))
+			{
+				return false;
+			}
+			OutProperty = nullptr;
 		}
 	}
-	return nullptr;
+
+	return OutProperty != nullptr;
+}
+
+bool FMCPTool_SetProperty::TryNavigateToComponent(
+	UObject*& CurrentObject,
+	const FString& PartName,
+	bool bIsLastPart,
+	FString& OutError)
+{
+	AActor* Actor = Cast<AActor>(CurrentObject);
+	if (!Actor)
+	{
+		return false;
+	}
+
+	for (UActorComponent* Comp : Actor->GetComponents())
+	{
+		if (Comp && Comp->GetName().Contains(PartName))
+		{
+			if (bIsLastPart)
+			{
+				OutError = FString::Printf(TEXT("Cannot set component as value: %s"), *PartName);
+				return false;
+			}
+			CurrentObject = Comp;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FMCPTool_SetProperty::NavigateIntoNestedObject(
+	UObject*& CurrentObject,
+	FProperty* Property,
+	const FString& PartName,
+	FString& OutError)
+{
+	FObjectProperty* ObjProp = CastField<FObjectProperty>(Property);
+	if (!ObjProp)
+	{
+		OutError = FString::Printf(TEXT("Cannot navigate into non-object property: %s"), *PartName);
+		return false;
+	}
+
+	UObject* NestedObj = ObjProp->GetObjectPropertyValue(ObjProp->ContainerPtrToValuePtr<void>(CurrentObject));
+	if (!NestedObj)
+	{
+		OutError = FString::Printf(TEXT("Nested object is null: %s"), *PartName);
+		return false;
+	}
+
+	CurrentObject = NestedObj;
+	return true;
+}
+
+bool FMCPTool_SetProperty::SetNumericPropertyValue(FNumericProperty* NumProp, void* ValuePtr, const TSharedPtr<FJsonValue>& Value)
+{
+	if (NumProp->IsFloatingPoint())
+	{
+		double DoubleVal = 0.0;
+		if (Value->TryGetNumber(DoubleVal))
+		{
+			NumProp->SetFloatingPointPropertyValue(ValuePtr, DoubleVal);
+			return true;
+		}
+	}
+	else if (NumProp->IsInteger())
+	{
+		int64 IntVal = 0;
+		if (Value->TryGetNumber(IntVal))
+		{
+			NumProp->SetIntPropertyValue(ValuePtr, IntVal);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, void* ValuePtr, const TSharedPtr<FJsonValue>& Value)
+{
+	const TSharedPtr<FJsonObject>* ObjVal;
+	if (!Value->TryGetObject(ObjVal))
+	{
+		return false;
+	}
+
+	if (StructProp->Struct == TBaseStructure<FVector>::Get())
+	{
+		FVector Vec;
+		(*ObjVal)->TryGetNumberField(TEXT("x"), Vec.X);
+		(*ObjVal)->TryGetNumberField(TEXT("y"), Vec.Y);
+		(*ObjVal)->TryGetNumberField(TEXT("z"), Vec.Z);
+		*reinterpret_cast<FVector*>(ValuePtr) = Vec;
+		return true;
+	}
+
+	if (StructProp->Struct == TBaseStructure<FRotator>::Get())
+	{
+		FRotator Rot;
+		(*ObjVal)->TryGetNumberField(TEXT("pitch"), Rot.Pitch);
+		(*ObjVal)->TryGetNumberField(TEXT("yaw"), Rot.Yaw);
+		(*ObjVal)->TryGetNumberField(TEXT("roll"), Rot.Roll);
+		*reinterpret_cast<FRotator*>(ValuePtr) = Rot;
+		return true;
+	}
+
+	if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
+	{
+		FLinearColor Color;
+		(*ObjVal)->TryGetNumberField(TEXT("r"), Color.R);
+		(*ObjVal)->TryGetNumberField(TEXT("g"), Color.G);
+		(*ObjVal)->TryGetNumberField(TEXT("b"), Color.B);
+		(*ObjVal)->TryGetNumberField(TEXT("a"), Color.A);
+		*reinterpret_cast<FLinearColor*>(ValuePtr) = Color;
+		return true;
+	}
+
+	return false;
 }
 
 bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& PropertyPath, const TSharedPtr<FJsonValue>& Value, FString& OutError)
@@ -106,110 +261,34 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 		return false;
 	}
 
-	// Handle nested property paths (e.g., "LightComponent.Intensity")
+	// Parse property path and navigate to target
 	TArray<FString> PathParts;
 	PropertyPath.ParseIntoArray(PathParts, TEXT("."), true);
 
-	UObject* CurrentObject = Object;
+	UObject* TargetObject = nullptr;
 	FProperty* Property = nullptr;
 
-	// Navigate to the final object/property
-	for (int32 i = 0; i < PathParts.Num(); ++i)
+	if (!NavigateToProperty(Object, PathParts, TargetObject, Property, OutError))
 	{
-		const FString& PartName = PathParts[i];
-
-		// Try to find the property
-		Property = CurrentObject->GetClass()->FindPropertyByName(FName(*PartName));
-
-		if (!Property)
+		if (OutError.IsEmpty())
 		{
-			// Try finding as component
-			AActor* Actor = Cast<AActor>(CurrentObject);
-			if (Actor)
-			{
-				for (UActorComponent* Comp : Actor->GetComponents())
-				{
-					if (Comp && Comp->GetName().Contains(PartName))
-					{
-						if (i == PathParts.Num() - 1)
-						{
-							// This is the final part but it's a component, can't set it
-							OutError = FString::Printf(TEXT("Cannot set component as value: %s"), *PartName);
-							return false;
-						}
-						CurrentObject = Comp;
-						Property = nullptr;
-						break;
-					}
-				}
-			}
-
-			if (!Property && i == PathParts.Num() - 1)
-			{
-				OutError = FString::Printf(TEXT("Property not found: %s on %s"), *PartName, *CurrentObject->GetClass()->GetName());
-				return false;
-			}
-
-			continue;
+			OutError = FString::Printf(TEXT("Property not found: %s"), *PropertyPath);
 		}
-
-		// If not the last part, navigate into nested object
-		if (i < PathParts.Num() - 1)
-		{
-			FObjectProperty* ObjProp = CastField<FObjectProperty>(Property);
-			if (ObjProp)
-			{
-				UObject* NestedObj = ObjProp->GetObjectPropertyValue(ObjProp->ContainerPtrToValuePtr<void>(CurrentObject));
-				if (NestedObj)
-				{
-					CurrentObject = NestedObj;
-					Property = nullptr;
-				}
-				else
-				{
-					OutError = FString::Printf(TEXT("Nested object is null: %s"), *PartName);
-					return false;
-				}
-			}
-			else
-			{
-				OutError = FString::Printf(TEXT("Cannot navigate into non-object property: %s"), *PartName);
-				return false;
-			}
-		}
-	}
-
-	if (!Property)
-	{
-		OutError = FString::Printf(TEXT("Property not found: %s"), *PropertyPath);
 		return false;
 	}
 
-	// Get property address
-	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(CurrentObject);
+	// Get property address and set value based on type
+	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(TargetObject);
 
-	// Set value based on property type
+	// Try numeric property
 	if (FNumericProperty* NumProp = CastField<FNumericProperty>(Property))
 	{
-		if (NumProp->IsFloatingPoint())
+		if (SetNumericPropertyValue(NumProp, ValuePtr, Value))
 		{
-			double DoubleVal = 0.0;
-			if (Value->TryGetNumber(DoubleVal))
-			{
-				NumProp->SetFloatingPointPropertyValue(ValuePtr, DoubleVal);
-				return true;
-			}
-		}
-		else if (NumProp->IsInteger())
-		{
-			int64 IntVal = 0;
-			if (Value->TryGetNumber(IntVal))
-			{
-				NumProp->SetIntPropertyValue(ValuePtr, IntVal);
-				return true;
-			}
+			return true;
 		}
 	}
+	// Try bool property
 	else if (FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
 	{
 		bool BoolVal = false;
@@ -219,6 +298,7 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 			return true;
 		}
 	}
+	// Try string property
 	else if (FStrProperty* StrProp = CastField<FStrProperty>(Property))
 	{
 		FString StrVal;
@@ -228,6 +308,7 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 			return true;
 		}
 	}
+	// Try name property
 	else if (FNameProperty* NameProp = CastField<FNameProperty>(Property))
 	{
 		FString StrVal;
@@ -237,48 +318,12 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 			return true;
 		}
 	}
+	// Try struct property
 	else if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
 	{
-		// Handle common struct types
-		if (StructProp->Struct == TBaseStructure<FVector>::Get())
+		if (SetStructPropertyValue(StructProp, ValuePtr, Value))
 		{
-			const TSharedPtr<FJsonObject>* ObjVal;
-			if (Value->TryGetObject(ObjVal))
-			{
-				FVector Vec;
-				(*ObjVal)->TryGetNumberField(TEXT("x"), Vec.X);
-				(*ObjVal)->TryGetNumberField(TEXT("y"), Vec.Y);
-				(*ObjVal)->TryGetNumberField(TEXT("z"), Vec.Z);
-				*reinterpret_cast<FVector*>(ValuePtr) = Vec;
-				return true;
-			}
-		}
-		else if (StructProp->Struct == TBaseStructure<FRotator>::Get())
-		{
-			const TSharedPtr<FJsonObject>* ObjVal;
-			if (Value->TryGetObject(ObjVal))
-			{
-				FRotator Rot;
-				(*ObjVal)->TryGetNumberField(TEXT("pitch"), Rot.Pitch);
-				(*ObjVal)->TryGetNumberField(TEXT("yaw"), Rot.Yaw);
-				(*ObjVal)->TryGetNumberField(TEXT("roll"), Rot.Roll);
-				*reinterpret_cast<FRotator*>(ValuePtr) = Rot;
-				return true;
-			}
-		}
-		else if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
-		{
-			const TSharedPtr<FJsonObject>* ObjVal;
-			if (Value->TryGetObject(ObjVal))
-			{
-				FLinearColor Color;
-				(*ObjVal)->TryGetNumberField(TEXT("r"), Color.R);
-				(*ObjVal)->TryGetNumberField(TEXT("g"), Color.G);
-				(*ObjVal)->TryGetNumberField(TEXT("b"), Color.B);
-				(*ObjVal)->TryGetNumberField(TEXT("a"), Color.A);
-				*reinterpret_cast<FLinearColor*>(ValuePtr) = Color;
-				return true;
-			}
+			return true;
 		}
 	}
 

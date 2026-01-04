@@ -127,6 +127,8 @@ UnrealClaude automatically gathers information about your project:
 
 The plugin includes a Model Context Protocol (MCP) server that exposes editor functionality to external tools. Available MCP tools:
 
+#### Actor Tools
+
 | Tool | Description |
 |------|-------------|
 | `get_level_actors` | List all actors in the current level |
@@ -134,8 +136,29 @@ The plugin includes a Model Context Protocol (MCP) server that exposes editor fu
 | `delete_actors` | Delete actors by name |
 | `move_actor` | Move/rotate/scale actors |
 | `set_property` | Set actor properties |
+
+#### Blueprint Tools
+
+| Tool | Description |
+|------|-------------|
+| `blueprint_query` | Query Blueprint information (list, inspect, get_graph) |
+| `blueprint_modify` | Modify Blueprints (create, add/remove variables and functions, add/delete nodes, connect/disconnect pins, set pin values) |
+
+The `blueprint_modify` tool supports:
+- **Level 2**: Create Blueprints, add/remove variables and functions
+- **Level 3**: Add single or batch nodes to graphs
+- **Level 4**: Connect/disconnect pins, set default pin values
+
+All modifications auto-compile the Blueprint after changes.
+
+#### Utility Tools
+
+| Tool | Description |
+|------|-------------|
 | `run_console_command` | Execute Unreal console commands |
 | `get_output_log` | Read recent output log entries with optional filtering |
+| `capture_viewport` | Capture viewport screenshot |
+| `execute_script` | Execute Python/BP scripts with permission |
 
 The MCP server runs on port 8080 by default. See `.mcp.json` for configuration.
 

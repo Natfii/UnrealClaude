@@ -2,6 +2,7 @@
 
 #include "ClaudeCodeRunner.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeConstants.h"
 #include "ProjectContext.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
@@ -346,8 +347,9 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 
 			FString MCPConfigPath = FPaths::Combine(MCPConfigDir, TEXT("mcp-config.json"));
 			FString MCPConfigContent = FString::Printf(
-				TEXT("{\n  \"mcpServers\": {\n    \"unrealclaude\": {\n      \"command\": \"node\",\n      \"args\": [\"%s\"],\n      \"env\": {\n        \"UNREAL_MCP_URL\": \"http://localhost:3000\"\n      }\n    }\n  }\n}"),
-				*MCPBridgePath.Replace(TEXT("\\"), TEXT("/"))
+				TEXT("{\n  \"mcpServers\": {\n    \"unrealclaude\": {\n      \"command\": \"node\",\n      \"args\": [\"%s\"],\n      \"env\": {\n        \"UNREAL_MCP_URL\": \"http://localhost:%d\"\n      }\n    }\n  }\n}"),
+				*MCPBridgePath.Replace(TEXT("\\"), TEXT("/")),
+				UnrealClaudeConstants::MCPServer::DefaultPort
 			);
 
 			if (FFileHelper::SaveStringToFile(MCPConfigContent, *MCPConfigPath))

@@ -31,6 +31,15 @@ namespace UnrealClaudeConstants
 
 		/** Minimum height for input text area */
 		constexpr float MinInputHeight = 60.0f;
+
+		/** Default permission dialog width */
+		constexpr float PermissionDialogWidth = 700.0f;
+
+		/** Default permission dialog height */
+		constexpr float PermissionDialogHeight = 500.0f;
+
+		/** Maximum script preview length in characters */
+		constexpr int32 MaxScriptPreviewLength = 2000;
 	}
 
 	// Session Management
@@ -86,5 +95,40 @@ namespace UnrealClaudeConstants
 	{
 		/** Maximum absolute value for coordinate values */
 		constexpr double MaxCoordinateValue = 1e10;
+	}
+
+	// Script Execution
+	namespace ScriptExecution
+	{
+		/** Maximum wait time for Live Coding compilation in seconds */
+		constexpr float MaxCompileWaitSeconds = 60.0f;
+
+		/** Poll interval when waiting for compilation in seconds */
+		constexpr float CompilePollIntervalSeconds = 0.5f;
+
+		/** Maximum script history entries to retain */
+		constexpr int32 MaxHistorySize = 100;
+
+		/** Default number of recent scripts to return */
+		constexpr int32 DefaultHistoryCount = 10;
+
+		/** Maximum scripts to return in history query */
+		constexpr int32 MaxHistoryQueryCount = 50;
+	}
+
+	// MCP Server
+	namespace MCPServer
+	{
+		/** Default port for MCP HTTP server */
+		constexpr uint32 DefaultPort = 3000;
+
+		/** Timeout for game thread execution in milliseconds */
+		constexpr uint32 GameThreadTimeoutMs = 30000;
+
+		/** Default output log lines to return */
+		constexpr int32 DefaultOutputLogLines = 100;
+
+		/** Maximum output log lines to return */
+		constexpr int32 MaxOutputLogLines = 1000;
 	}
 }

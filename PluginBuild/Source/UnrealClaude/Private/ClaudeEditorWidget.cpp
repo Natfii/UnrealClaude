@@ -5,6 +5,8 @@
 #include "ClaudeSubsystem.h"
 #include "UnrealClaudeModule.h"
 #include "ProjectContext.h"
+#include "Widgets/SClaudeToolbar.h"
+#include "Widgets/SClaudeInputArea.h"
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -147,121 +149,17 @@ SClaudeEditorWidget::~SClaudeEditorWidget()
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildToolbar()
 {
-	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(FMargin(8.0f, 4.0f))
-		[
-			SNew(SHorizontalBox)
-			
-			// Title
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Claude Assistant"))
-				.TextStyle(FAppStyle::Get(), "LargeText")
-			]
-			
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SNullWidget::NullWidget
-			]
-			
-			// UE5.7 Context checkbox
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(8.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([this]() { return bIncludeUE57Context ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { bIncludeUE57Context = (NewState == ECheckBoxState::Checked); })
-				.ToolTipText(LOCTEXT("UE57ContextTip", "Include Unreal Engine 5.7 context in prompts"))
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("UE57Context", "UE5.7 Context"))
-				]
-			]
-
-			// Project Context checkbox
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SCheckBox)
-				.IsChecked_Lambda([this]() { return bIncludeProjectContext ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-				.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { bIncludeProjectContext = (NewState == ECheckBoxState::Checked); })
-				.ToolTipText(LOCTEXT("ProjectContextTip", "Include project source files and level actors in prompts"))
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("ProjectContext", "Project Context"))
-				]
-			]
-
-			// Refresh Context button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("RefreshContext", "Refresh Context"))
-				.OnClicked_Lambda([this]() { RefreshProjectContext(); return FReply::Handled(); })
-				.ToolTipText(LOCTEXT("RefreshContextTip", "Refresh project context (source files, classes, level actors)"))
-			]
-
-			// Restore Context button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("RestoreContext", "Restore Context"))
-				.OnClicked_Lambda([this]() { RestoreSession(); return FReply::Handled(); })
-				.ToolTipText(LOCTEXT("RestoreContextTip", "Restore previous session context from disk"))
-				.IsEnabled_Lambda([this]() { return FClaudeCodeSubsystem::Get().HasSavedSession(); })
-			]
-
-			// New Session button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("NewSession", "New Session"))
-				.OnClicked_Lambda([this]() { NewSession(); return FReply::Handled(); })
-				.ToolTipText(LOCTEXT("NewSessionTip", "Start a new session (clears history)"))
-			]
-
-			// Clear button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Clear", "Clear"))
-				.OnClicked_Lambda([this]() { ClearChat(); return FReply::Handled(); })
-				.ToolTipText(LOCTEXT("ClearTip", "Clear chat display"))
-			]
-
-			// Copy button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(4.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("Copy", "Copy Last"))
-				.OnClicked_Lambda([this]() { CopyToClipboard(); return FReply::Handled(); })
-				.ToolTipText(LOCTEXT("CopyTip", "Copy last response to clipboard"))
-			]
-		];
+	return SNew(SClaudeToolbar)
+		.bUE57ContextEnabled_Lambda([this]() { return bIncludeUE57Context; })
+		.bProjectContextEnabled_Lambda([this]() { return bIncludeProjectContext; })
+		.bRestoreEnabled_Lambda([this]() { return FClaudeCodeSubsystem::Get().HasSavedSession(); })
+		.OnUE57ContextChanged_Lambda([this](bool bEnabled) { bIncludeUE57Context = bEnabled; })
+		.OnProjectContextChanged_Lambda([this](bool bEnabled) { bIncludeProjectContext = bEnabled; })
+		.OnRefreshContext_Lambda([this]() { RefreshProjectContext(); })
+		.OnRestoreSession_Lambda([this]() { RestoreSession(); })
+		.OnNewSession_Lambda([this]() { NewSession(); })
+		.OnClear_Lambda([this]() { ClearChat(); })
+		.OnCopyLast_Lambda([this]() { CopyToClipboard(); });
 }
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildChatArea()
@@ -280,113 +178,13 @@ TSharedRef<SWidget> SClaudeEditorWidget::BuildChatArea()
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildInputArea()
 {
-	return SNew(SVerticalBox)
+	SAssignNew(InputArea, SClaudeInputArea)
+		.bIsWaiting_Lambda([this]() { return bIsWaitingForResponse; })
+		.OnSend_Lambda([this]() { SendMessage(); })
+		.OnCancel_Lambda([this]() { CancelRequest(); })
+		.OnTextChanged_Lambda([this](const FString& Text) { CurrentInputText = Text; });
 
-		// Input row
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.MaxHeight(300.0f) // Allow up to 300px for large pastes
-		[
-			SNew(SHorizontalBox)
-
-			// Input text box with scroll support
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SNew(SBox)
-				.MinDesiredHeight(60.0f)
-				.MaxDesiredHeight(300.0f)
-				[
-					SNew(SScrollBox)
-					.Orientation(Orient_Vertical)
-					+ SScrollBox::Slot()
-					[
-						SAssignNew(InputTextBox, SMultiLineEditableTextBox)
-						.HintText(LOCTEXT("InputHint", "Ask Claude about Unreal Engine 5.7... (Shift+Enter for newline)"))
-						.AutoWrapText(true)
-						.AllowMultiLine(true)
-						.OnTextChanged(this, &SClaudeEditorWidget::OnInputTextChanged)
-						.OnTextCommitted(this, &SClaudeEditorWidget::OnInputTextCommitted)
-						.OnKeyDownHandler(this, &SClaudeEditorWidget::OnInputKeyDown)
-						.IsEnabled_Lambda([this]() { return !bIsWaitingForResponse; })
-					]
-				]
-			]
-
-			// Buttons column
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-			.VAlign(VAlign_Bottom)
-			[
-				SNew(SVerticalBox)
-
-				// Paste from clipboard button
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 0.0f, 0.0f, 4.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Paste", "Paste"))
-					.OnClicked_Lambda([this]()
-					{
-						FString ClipboardText;
-						FPlatformApplicationMisc::ClipboardPaste(ClipboardText);
-						if (!ClipboardText.IsEmpty() && InputTextBox.IsValid())
-						{
-							// Append to existing text
-							FString NewText = CurrentInputText + ClipboardText;
-							CurrentInputText = NewText;
-							InputTextBox->SetText(FText::FromString(NewText));
-						}
-						return FReply::Handled();
-					})
-					.ToolTipText(LOCTEXT("PasteTip", "Paste text from clipboard (supports large text)"))
-					.IsEnabled_Lambda([this]() { return !bIsWaitingForResponse; })
-				]
-
-				// Send/Cancel button
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(SButton)
-					.Text_Lambda([this]() { return bIsWaitingForResponse ? LOCTEXT("Cancel", "Cancel") : LOCTEXT("Send", "Send"); })
-					.OnClicked_Lambda([this]()
-					{
-						if (bIsWaitingForResponse)
-						{
-							CancelRequest();
-						}
-						else
-						{
-							SendMessage();
-						}
-						return FReply::Handled();
-					})
-					.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
-				]
-			]
-		]
-
-		// Character count indicator
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.HAlign(HAlign_Right)
-		.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-		[
-			SNew(STextBlock)
-			.Text_Lambda([this]()
-			{
-				int32 CharCount = CurrentInputText.Len();
-				if (CharCount > 0)
-				{
-					return FText::Format(LOCTEXT("CharCount", "{0} chars"), FText::AsNumber(CharCount));
-				}
-				return FText::GetEmpty();
-			})
-			.TextStyle(FAppStyle::Get(), "SmallText")
-			.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
-		];
+	return InputArea.ToSharedRef();
 }
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildStatusBar()
@@ -466,9 +264,9 @@ void SClaudeEditorWidget::SendMessage()
 	// Save and clear input
 	FString Prompt = CurrentInputText;
 	CurrentInputText.Empty();
-	if (InputTextBox.IsValid())
+	if (InputArea.IsValid())
 	{
-		InputTextBox->SetText(FText::GetEmpty());
+		InputArea->ClearText();
 	}
 
 	// Set waiting state
@@ -636,32 +434,6 @@ FSlateColor SClaudeEditorWidget::GetStatusColor() const
 	}
 	
 	return FSlateColor(FLinearColor(0.3f, 1.0f, 0.3f)); // Green
-}
-
-void SClaudeEditorWidget::OnInputTextChanged(const FText& NewText)
-{
-	CurrentInputText = NewText.ToString();
-}
-
-void SClaudeEditorWidget::OnInputTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
-{
-	// Don't send on commit - use explicit Enter key handling
-}
-
-FReply SClaudeEditorWidget::OnInputKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
-{
-	// Enter (without Shift) or Ctrl+Enter to send
-	// Shift+Enter allows newline
-	if (InKeyEvent.GetKey() == EKeys::Enter)
-	{
-		if (!InKeyEvent.IsShiftDown())
-		{
-			SendMessage();
-			return FReply::Handled();
-		}
-	}
-
-	return FReply::Unhandled();
 }
 
 void SClaudeEditorWidget::StartStreamingResponse()

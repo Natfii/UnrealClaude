@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Get the Unreal Engine output log
  */
-class FMCPTool_GetOutputLog : public IMCPTool
+class FMCPTool_GetOutputLog : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

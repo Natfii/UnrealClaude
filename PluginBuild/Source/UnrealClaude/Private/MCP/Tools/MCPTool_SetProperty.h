@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Set a property on an actor
  */
-class FMCPTool_SetProperty : public IMCPTool
+class FMCPTool_SetProperty : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override
@@ -27,8 +27,33 @@ public:
 	virtual FMCPToolResult Execute(const TSharedRef<FJsonObject>& Params) override;
 
 private:
-	/** Helper to find an actor by name */
-	AActor* FindActorByName(UWorld* World, const FString& Name);
+	/** Navigate through a property path to find the target object and property */
+	bool NavigateToProperty(
+		UObject* StartObject,
+		const TArray<FString>& PathParts,
+		UObject*& OutObject,
+		FProperty*& OutProperty,
+		FString& OutError);
+
+	/** Try to navigate into a component on an actor */
+	bool TryNavigateToComponent(
+		UObject*& CurrentObject,
+		const FString& PartName,
+		bool bIsLastPart,
+		FString& OutError);
+
+	/** Navigate into a nested object property */
+	bool NavigateIntoNestedObject(
+		UObject*& CurrentObject,
+		FProperty* Property,
+		const FString& PartName,
+		FString& OutError);
+
+	/** Set a numeric property value from JSON */
+	bool SetNumericPropertyValue(FNumericProperty* NumProp, void* ValuePtr, const TSharedPtr<FJsonValue>& Value);
+
+	/** Set a struct property value from JSON (FVector, FRotator, FLinearColor) */
+	bool SetStructPropertyValue(FStructProperty* StructProp, void* ValuePtr, const TSharedPtr<FJsonValue>& Value);
 
 	/** Helper to set a property value from JSON */
 	bool SetPropertyFromJson(UObject* Object, const FString& PropertyPath, const TSharedPtr<FJsonValue>& Value, FString& OutError);

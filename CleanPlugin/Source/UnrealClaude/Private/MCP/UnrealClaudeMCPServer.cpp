@@ -3,6 +3,7 @@
 #include "UnrealClaudeMCPServer.h"
 #include "MCPToolRegistry.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeConstants.h"
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
 #include "HttpServerRequest.h"
@@ -13,7 +14,7 @@
 
 FUnrealClaudeMCPServer::FUnrealClaudeMCPServer()
 	: bIsRunning(false)
-	, ServerPort(3000)
+	, ServerPort(UnrealClaudeConstants::MCPServer::DefaultPort)
 {
 	ToolRegistry = MakeShared<FMCPToolRegistry>();
 }
@@ -259,8 +260,8 @@ TUniquePtr<FHttpServerResponse> FUnrealClaudeMCPServer::CreateJsonResponse(const
 	TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(JsonContent, TEXT("application/json"));
 	Response->Code = Code;
 
-	// Add CORS headers for local development
-	Response->Headers.Add(TEXT("Access-Control-Allow-Origin"), { TEXT("*") });
+	// Add CORS headers - restricted to localhost for security
+	Response->Headers.Add(TEXT("Access-Control-Allow-Origin"), { TEXT("http://localhost") });
 	Response->Headers.Add(TEXT("Access-Control-Allow-Methods"), { TEXT("GET, POST, OPTIONS") });
 	Response->Headers.Add(TEXT("Access-Control-Allow-Headers"), { TEXT("Content-Type") });
 

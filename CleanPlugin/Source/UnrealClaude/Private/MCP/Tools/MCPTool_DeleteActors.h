@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Delete actors from the level
  */
-class FMCPTool_DeleteActors : public IMCPTool
+class FMCPTool_DeleteActors : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

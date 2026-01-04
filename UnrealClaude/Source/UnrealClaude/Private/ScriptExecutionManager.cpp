@@ -161,6 +161,72 @@ FScriptExecutionResult FScriptExecutionManager::ExecuteCpp(
 #endif
 }
 
+/**
+ * Custom output device to capture Live Coding compilation output
+ * Monitors for error patterns in compiler output
+ */
+class FLiveCodingOutputCapture : public FOutputDevice
+{
+public:
+	TArray<FString> ErrorMessages;
+	TArray<FString> WarningMessages;
+	bool bHasErrors = false;
+
+	virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+	{
+		FString Message(V);
+
+		// Check for Live Coding specific messages
+		if (Category == FName("LiveCoding") || Category == FName("LogLiveCoding"))
+		{
+			if (Verbosity == ELogVerbosity::Error || Verbosity == ELogVerbosity::Fatal)
+			{
+				ErrorMessages.Add(Message);
+				bHasErrors = true;
+			}
+			else if (Verbosity == ELogVerbosity::Warning)
+			{
+				WarningMessages.Add(Message);
+			}
+		}
+
+		// Also check for compiler error patterns in any category
+		if (Message.Contains(TEXT("error C")) ||      // MSVC error
+		    Message.Contains(TEXT("error:")) ||        // Generic compiler error
+		    Message.Contains(TEXT("fatal error")) ||   // Fatal errors
+		    Message.Contains(TEXT("LNK2001")) ||       // Linker errors
+		    Message.Contains(TEXT("LNK2019")))
+		{
+			if (!ErrorMessages.Contains(Message))
+			{
+				ErrorMessages.Add(Message);
+				bHasErrors = true;
+			}
+		}
+	}
+
+	FString GetErrorSummary() const
+	{
+		if (ErrorMessages.Num() == 0)
+		{
+			return FString();
+		}
+
+		// Return first few errors (avoid overwhelming output)
+		FString Summary;
+		int32 MaxErrors = FMath::Min(5, ErrorMessages.Num());
+		for (int32 i = 0; i < MaxErrors; i++)
+		{
+			Summary += ErrorMessages[i] + TEXT("\n");
+		}
+		if (ErrorMessages.Num() > MaxErrors)
+		{
+			Summary += FString::Printf(TEXT("... and %d more errors"), ErrorMessages.Num() - MaxErrors);
+		}
+		return Summary;
+	}
+};
+
 bool FScriptExecutionManager::TriggerLiveCodingCompile(FString& OutErrorLog)
 {
 #if WITH_LIVE_CODING
@@ -177,10 +243,14 @@ bool FScriptExecutionManager::TriggerLiveCodingCompile(FString& OutErrorLog)
 		return false;
 	}
 
+	// Set up output capture to monitor for compilation errors
+	FLiveCodingOutputCapture OutputCapture;
+	GLog->AddOutputDevice(&OutputCapture);
+
 	// Trigger compilation
 	LiveCoding->Compile(ELiveCodingCompileFlags::None, nullptr);
 
-	// Wait for compilation (simplified - in production would use delegates)
+	// Wait for compilation with polling
 	float WaitTime = 0.0f;
 	const float MaxWait = 60.0f;
 	const float PollInterval = 0.5f;
@@ -191,14 +261,25 @@ bool FScriptExecutionManager::TriggerLiveCodingCompile(FString& OutErrorLog)
 		WaitTime += PollInterval;
 	}
 
+	// Remove output capture
+	GLog->RemoveOutputDevice(&OutputCapture);
+
+	// Check for timeout
 	if (WaitTime >= MaxWait)
 	{
 		OutErrorLog = TEXT("Live Coding compilation timed out (60s)");
 		return false;
 	}
 
-	// Check for errors - would need to parse output log in production
-	// For now, assume success if compilation completed
+	// Check for compilation errors captured from output log
+	if (OutputCapture.bHasErrors)
+	{
+		OutErrorLog = OutputCapture.GetErrorSummary();
+		UE_LOG(LogUnrealClaude, Error, TEXT("Live Coding compilation failed:\n%s"), *OutErrorLog);
+		return false;
+	}
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("Live Coding compilation completed successfully"));
 	return true;
 #else
 	OutErrorLog = TEXT("Live Coding not available in this build");
@@ -235,7 +316,7 @@ FScriptExecutionResult FScriptExecutionManager::ExecutePython(
 	FString Command = FString::Printf(TEXT("py \"%s\""), *FilePath);
 
 	// Capture output using shared utility
-	FStringOutputDevice OutputDevice;
+	FUnrealClaudeOutputDevice OutputDevice;
 	GEditor->Exec(World, *Command, OutputDevice);
 
 	FString Output = OutputDevice.GetTrimmedOutput();
@@ -294,7 +375,7 @@ FScriptExecutionResult FScriptExecutionManager::ExecuteConsole(
 	ScriptContent.ParseIntoArrayLines(Commands, true);
 
 	// Output capture using shared utility
-	FStringOutputDevice OutputDevice;
+	FUnrealClaudeOutputDevice OutputDevice;
 	FString AllOutput;
 	int32 ExecutedCount = 0;
 

@@ -3,6 +3,7 @@
 #include "MCPTool_SpawnActor.h"
 #include "MCP/MCPParamValidator.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeUtils.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -12,23 +13,19 @@
 
 FMCPToolResult FMCPTool_SpawnActor::Execute(const TSharedRef<FJsonObject>& Params)
 {
-	// Validate we're in editor
-	if (!GEditor)
+	// Validate editor context using base class
+	UWorld* World = nullptr;
+	if (auto Error = ValidateEditorContext(World))
 	{
-		return FMCPToolResult::Error(TEXT("Editor not available"));
+		return Error.GetValue();
 	}
 
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World)
-	{
-		return FMCPToolResult::Error(TEXT("No active world"));
-	}
-
-	// Get class path
+	// Extract and validate class path using base class helper
 	FString ClassPath;
-	if (!Params->TryGetStringField(TEXT("class"), ClassPath))
+	TOptional<FMCPToolResult> ParamError;
+	if (!ExtractRequiredString(Params, TEXT("class"), ClassPath, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: class"));
+		return ParamError.GetValue();
 	}
 
 	// Validate class path
@@ -68,39 +65,21 @@ FMCPToolResult FMCPTool_SpawnActor::Execute(const TSharedRef<FJsonObject>& Param
 		return FMCPToolResult::Error(FString::Printf(TEXT("Could not find actor class: %s"), *ClassPath));
 	}
 
-	// Parse location
-	FVector Location = FVector::ZeroVector;
-	const TSharedPtr<FJsonObject>* LocationObj;
-	if (Params->TryGetObjectField(TEXT("location"), LocationObj))
-	{
-		(*LocationObj)->TryGetNumberField(TEXT("x"), Location.X);
-		(*LocationObj)->TryGetNumberField(TEXT("y"), Location.Y);
-		(*LocationObj)->TryGetNumberField(TEXT("z"), Location.Z);
-	}
+	// Parse transform using shared utilities
+	const TSharedPtr<FJsonObject>* LocationObj = nullptr;
+	const TSharedPtr<FJsonObject>* RotationObj = nullptr;
+	const TSharedPtr<FJsonObject>* ScaleObj = nullptr;
 
-	// Parse rotation
-	FRotator Rotation = FRotator::ZeroRotator;
-	const TSharedPtr<FJsonObject>* RotationObj;
-	if (Params->TryGetObjectField(TEXT("rotation"), RotationObj))
-	{
-		(*RotationObj)->TryGetNumberField(TEXT("pitch"), Rotation.Pitch);
-		(*RotationObj)->TryGetNumberField(TEXT("yaw"), Rotation.Yaw);
-		(*RotationObj)->TryGetNumberField(TEXT("roll"), Rotation.Roll);
-	}
+	Params->TryGetObjectField(TEXT("location"), LocationObj);
+	Params->TryGetObjectField(TEXT("rotation"), RotationObj);
+	Params->TryGetObjectField(TEXT("scale"), ScaleObj);
 
-	// Parse scale
-	FVector Scale = FVector::OneVector;
-	const TSharedPtr<FJsonObject>* ScaleObj;
-	if (Params->TryGetObjectField(TEXT("scale"), ScaleObj))
-	{
-		(*ScaleObj)->TryGetNumberField(TEXT("x"), Scale.X);
-		(*ScaleObj)->TryGetNumberField(TEXT("y"), Scale.Y);
-		(*ScaleObj)->TryGetNumberField(TEXT("z"), Scale.Z);
-	}
+	FVector Location = UnrealClaudeJsonUtils::ExtractVector(LocationObj ? *LocationObj : nullptr);
+	FRotator Rotation = UnrealClaudeJsonUtils::ExtractRotator(RotationObj ? *RotationObj : nullptr);
+	FVector Scale = UnrealClaudeJsonUtils::ExtractScale(ScaleObj ? *ScaleObj : nullptr);
 
-	// Get optional name
-	FString ActorName;
-	Params->TryGetStringField(TEXT("name"), ActorName);
+	// Get optional name using base class helper
+	FString ActorName = ExtractOptionalString(Params, TEXT("name"));
 
 	// Validate actor name if provided
 	if (!ActorName.IsEmpty())
@@ -128,20 +107,15 @@ FMCPToolResult FMCPTool_SpawnActor::Execute(const TSharedRef<FJsonObject>& Param
 		return FMCPToolResult::Error(FString::Printf(TEXT("Failed to spawn actor of class: %s"), *ClassPath));
 	}
 
-	// Mark the level as dirty
-	World->MarkPackageDirty();
+	// Mark the level as dirty using base class helper
+	MarkWorldDirty(World);
 
-	// Build result
+	// Build result using shared JSON utilities
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("actorName"), SpawnedActor->GetName());
 	ResultData->SetStringField(TEXT("actorClass"), ActorClass->GetName());
 	ResultData->SetStringField(TEXT("actorLabel"), SpawnedActor->GetActorLabel());
-
-	TSharedPtr<FJsonObject> LocationResult = MakeShared<FJsonObject>();
-	LocationResult->SetNumberField(TEXT("x"), Location.X);
-	LocationResult->SetNumberField(TEXT("y"), Location.Y);
-	LocationResult->SetNumberField(TEXT("z"), Location.Z);
-	ResultData->SetObjectField(TEXT("location"), LocationResult);
+	ResultData->SetObjectField(TEXT("location"), UnrealClaudeJsonUtils::VectorToJson(Location));
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Spawned actor '%s' of class '%s'"), *SpawnedActor->GetName(), *ActorClass->GetName()),

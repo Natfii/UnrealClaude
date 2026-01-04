@@ -3,6 +3,7 @@
 #include "MCPTool_GetLevelActors.h"
 #include "MCP/MCPParamValidator.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeUtils.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -10,16 +11,11 @@
 
 FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& Params)
 {
-	// Validate we're in editor
-	if (!GEditor)
+	// Validate editor context using base class
+	UWorld* World = nullptr;
+	if (auto Error = ValidateEditorContext(World))
 	{
-		return FMCPToolResult::Error(TEXT("Editor not available"));
-	}
-
-	UWorld* World = GEditor->GetEditorWorldContext().World();
-	if (!World)
-	{
-		return FMCPToolResult::Error(TEXT("No active world"));
+		return Error.GetValue();
 	}
 
 	// Parse parameters
@@ -103,29 +99,10 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 		ActorJson->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
 		ActorJson->SetBoolField(TEXT("hidden"), Actor->IsHidden());
 
-		// Add location
-		FVector Location = Actor->GetActorLocation();
-		TSharedPtr<FJsonObject> LocationJson = MakeShared<FJsonObject>();
-		LocationJson->SetNumberField(TEXT("x"), Location.X);
-		LocationJson->SetNumberField(TEXT("y"), Location.Y);
-		LocationJson->SetNumberField(TEXT("z"), Location.Z);
-		ActorJson->SetObjectField(TEXT("location"), LocationJson);
-
-		// Add rotation
-		FRotator Rotation = Actor->GetActorRotation();
-		TSharedPtr<FJsonObject> RotationJson = MakeShared<FJsonObject>();
-		RotationJson->SetNumberField(TEXT("pitch"), Rotation.Pitch);
-		RotationJson->SetNumberField(TEXT("yaw"), Rotation.Yaw);
-		RotationJson->SetNumberField(TEXT("roll"), Rotation.Roll);
-		ActorJson->SetObjectField(TEXT("rotation"), RotationJson);
-
-		// Add scale
-		FVector Scale = Actor->GetActorScale3D();
-		TSharedPtr<FJsonObject> ScaleJson = MakeShared<FJsonObject>();
-		ScaleJson->SetNumberField(TEXT("x"), Scale.X);
-		ScaleJson->SetNumberField(TEXT("y"), Scale.Y);
-		ScaleJson->SetNumberField(TEXT("z"), Scale.Z);
-		ActorJson->SetObjectField(TEXT("scale"), ScaleJson);
+		// Add transform using shared utilities
+		ActorJson->SetObjectField(TEXT("location"), UnrealClaudeJsonUtils::VectorToJson(Actor->GetActorLocation()));
+		ActorJson->SetObjectField(TEXT("rotation"), UnrealClaudeJsonUtils::RotatorToJson(Actor->GetActorRotation()));
+		ActorJson->SetObjectField(TEXT("scale"), UnrealClaudeJsonUtils::VectorToJson(Actor->GetActorScale3D()));
 
 		// Add tags if any
 		if (Actor->Tags.Num() > 0)

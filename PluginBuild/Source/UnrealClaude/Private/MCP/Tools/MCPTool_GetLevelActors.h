@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Get all actors in the current level
  */
-class FMCPTool_GetLevelActors : public IMCPTool
+class FMCPTool_GetLevelActors : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

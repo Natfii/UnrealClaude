@@ -127,6 +127,15 @@ private:
 	/** Parse UCLASS declarations from headers */
 	void ParseUClasses();
 
+	/** Parse a single UCLASS from file content starting at given position */
+	bool ParseSingleUClass(const FString& FileContent, const FString& RelativePath, int32 UClassPos, int32& OutNextSearchPos);
+
+	/** Skip whitespace characters and return new position */
+	static int32 SkipWhitespace(const FString& Content, int32 StartPos);
+
+	/** Parse an identifier (alphanumeric + underscore) starting at position */
+	static FString ParseIdentifier(const FString& Content, int32 StartPos, int32& OutEndPos);
+
 	/** Gather current level actors */
 	void GatherLevelActors();
 

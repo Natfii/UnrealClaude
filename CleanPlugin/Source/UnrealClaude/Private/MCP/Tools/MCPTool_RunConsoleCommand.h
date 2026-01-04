@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Run an Unreal console command
  */
-class FMCPTool_RunConsoleCommand : public IMCPTool
+class FMCPTool_RunConsoleCommand : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

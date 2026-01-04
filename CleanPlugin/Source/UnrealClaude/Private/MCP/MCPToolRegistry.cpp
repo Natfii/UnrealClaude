@@ -2,6 +2,7 @@
 
 #include "MCPToolRegistry.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeConstants.h"
 
 // Include all tool implementations
 #include "Tools/MCPTool_SpawnActor.h"
@@ -14,6 +15,9 @@
 #include "Tools/MCPTool_ExecuteScript.h"
 #include "Tools/MCPTool_CleanupScripts.h"
 #include "Tools/MCPTool_GetScriptHistory.h"
+#include "Tools/MCPTool_CaptureViewport.h"
+#include "Tools/MCPTool_BlueprintQuery.h"
+#include "Tools/MCPTool_BlueprintModify.h"
 
 FMCPToolRegistry::FMCPToolRegistry()
 {
@@ -42,6 +46,13 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 	RegisterTool(MakeShared<FMCPTool_ExecuteScript>());
 	RegisterTool(MakeShared<FMCPTool_CleanupScripts>());
 	RegisterTool(MakeShared<FMCPTool_GetScriptHistory>());
+
+	// Viewport capture
+	RegisterTool(MakeShared<FMCPTool_CaptureViewport>());
+
+	// Blueprint tools
+	RegisterTool(MakeShared<FMCPTool_BlueprintQuery>());
+	RegisterTool(MakeShared<FMCPTool_BlueprintModify>());
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Registered %d MCP tools"), Tools.Num());
 }
@@ -73,21 +84,37 @@ void FMCPToolRegistry::UnregisterTool(const FString& ToolName)
 {
 	if (Tools.Remove(ToolName) > 0)
 	{
+		InvalidateToolCache();
 		UE_LOG(LogUnrealClaude, Log, TEXT("Unregistered tool: %s"), *ToolName);
 	}
 }
 
+void FMCPToolRegistry::InvalidateToolCache()
+{
+	bCacheValid = false;
+	CachedToolInfo.Empty();
+}
+
 TArray<FMCPToolInfo> FMCPToolRegistry::GetAllTools() const
 {
-	TArray<FMCPToolInfo> Result;
+	// Return cached result if valid
+	if (bCacheValid)
+	{
+		return CachedToolInfo;
+	}
+
+	// Rebuild cache
+	CachedToolInfo.Empty(Tools.Num());
 	for (const auto& Pair : Tools)
 	{
 		if (Pair.Value.IsValid())
 		{
-			Result.Add(Pair.Value->GetInfo());
+			CachedToolInfo.Add(Pair.Value->GetInfo());
 		}
 	}
-	return Result;
+	bCacheValid = true;
+
+	return CachedToolInfo;
 }
 
 FMCPToolResult FMCPToolRegistry::ExecuteTool(const FString& ToolName, const TSharedRef<FJsonObject>& Params)
@@ -109,17 +136,29 @@ FMCPToolResult FMCPToolRegistry::ExecuteTool(const FString& ToolName, const TSha
 	}
 	else
 	{
-		// If called from non-game thread, dispatch to game thread and wait
+		// If called from non-game thread, dispatch to game thread and wait with timeout
 		FEvent* CompletionEvent = FPlatformProcess::GetSynchEventFromPool();
 
-		AsyncTask(ENamedThreads::GameThread, [&Result, FoundTool, &Params, CompletionEvent]()
+		// Use atomic to safely check if task completed
+		TAtomic<bool> bTaskCompleted(false);
+
+		AsyncTask(ENamedThreads::GameThread, [&Result, FoundTool, &Params, CompletionEvent, &bTaskCompleted]()
 		{
 			Result = (*FoundTool)->Execute(Params);
+			bTaskCompleted = true;
 			CompletionEvent->Trigger();
 		});
 
-		CompletionEvent->Wait();
+		// Wait with timeout to prevent indefinite hangs
+		const uint32 TimeoutMs = UnrealClaudeConstants::MCPServer::GameThreadTimeoutMs;
+		const bool bSignaled = CompletionEvent->Wait(TimeoutMs);
 		FPlatformProcess::ReturnSynchEventToPool(CompletionEvent);
+
+		if (!bSignaled || !bTaskCompleted)
+		{
+			UE_LOG(LogUnrealClaude, Error, TEXT("Tool '%s' execution timed out after %d ms"), *ToolName, TimeoutMs);
+			return FMCPToolResult::Error(FString::Printf(TEXT("Tool execution timed out after %d seconds"), TimeoutMs / 1000));
+		}
 	}
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Tool '%s' execution %s: %s"),

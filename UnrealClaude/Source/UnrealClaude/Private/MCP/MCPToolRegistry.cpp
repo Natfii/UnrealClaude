@@ -15,6 +15,9 @@
 #include "Tools/MCPTool_ExecuteScript.h"
 #include "Tools/MCPTool_CleanupScripts.h"
 #include "Tools/MCPTool_GetScriptHistory.h"
+#include "Tools/MCPTool_CaptureViewport.h"
+#include "Tools/MCPTool_BlueprintQuery.h"
+#include "Tools/MCPTool_BlueprintModify.h"
 
 FMCPToolRegistry::FMCPToolRegistry()
 {
@@ -43,6 +46,13 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 	RegisterTool(MakeShared<FMCPTool_ExecuteScript>());
 	RegisterTool(MakeShared<FMCPTool_CleanupScripts>());
 	RegisterTool(MakeShared<FMCPTool_GetScriptHistory>());
+
+	// Viewport capture
+	RegisterTool(MakeShared<FMCPTool_CaptureViewport>());
+
+	// Blueprint tools
+	RegisterTool(MakeShared<FMCPTool_BlueprintQuery>());
+	RegisterTool(MakeShared<FMCPTool_BlueprintModify>());
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Registered %d MCP tools"), Tools.Num());
 }

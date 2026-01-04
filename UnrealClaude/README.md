@@ -12,6 +12,7 @@ UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs
 - **Native Editor Integration** - Chat panel docked in your editor
 - **UE5.7 Context** - System prompts optimized for Unreal Engine 5.7 development
 - **MCP Server** - Model Context Protocol server for external tool integration
+- **Viewport Capture** - Claude can see your editor/game viewport for visual feedback
 - **Script Execution** - Claude can write, compile (via Live Coding), and execute scripts with your permission
 - **Session Persistence** - Conversation history saved across editor sessions
 - **Project-Aware** - Automatically gathers project context (modules, plugins, assets)
@@ -141,8 +142,56 @@ The plugin includes a Model Context Protocol (MCP) server that exposes editor fu
 | `set_property` | Set actor properties |
 | `run_console_command` | Execute Unreal console commands |
 | `get_output_log` | Read recent output log entries with optional filtering |
+| `capture_viewport` | Capture a screenshot of the active viewport |
+| `execute_script` | Execute C++, Python, or console scripts |
+| `get_script_history` | Retrieve script execution history |
+| `cleanup_scripts` | Remove generated script files |
+| `blueprint_query` | Query Blueprint info (list, inspect, get graph) |
+| `blueprint_modify` | Modify Blueprints (create, variables, functions, nodes, connections) |
 
-The MCP server runs on port 8080 by default. See `.mcp.json` for configuration.
+The MCP server runs on port 3000 by default. See `.mcp.json` for configuration.
+
+### Blueprint Tools
+
+Claude can work with Blueprint assets through two powerful MCP tools with four levels of capability:
+
+**blueprint_query** - Read Blueprint information:
+- `list`: Find Blueprints by path, type, or name filter
+- `inspect`: Get detailed info including variables, functions, and parent class
+- `get_graph`: Get graph statistics (node count, events)
+
+**blueprint_modify** - Create and edit Blueprints:
+
+*Level 2 - Variables & Functions:*
+- `create`: Create new Blueprints with specified parent class
+- `add_variable` / `remove_variable`: Manage Blueprint variables (supports all types: primitives, structs, object references, arrays)
+- `add_function` / `remove_function`: Manage Blueprint functions
+
+*Level 3 - Node Operations:*
+- `add_node`: Add a single node to a graph (supports: CallFunction, Branch, Event, VariableGet, VariableSet, Sequence, PrintString, Add, Subtract, Multiply, Divide)
+- `add_nodes`: Batch add multiple nodes with automatic connections
+- `delete_node`: Remove a node from a graph by ID
+
+*Level 4 - Connection Operations:*
+- `connect_pins`: Connect two pins by node ID and pin name (or auto-connect exec pins)
+- `disconnect_pins`: Disconnect two connected pins
+- `set_pin_value`: Set default value for an input pin
+
+**Node ID System**: Nodes are assigned descriptive IDs (e.g., `CallFunction_PrintString_1`) stored in the node's comment field. Use these IDs for connection and deletion operations.
+
+**Batch Operations**: The `add_nodes` operation accepts arrays of node specs and connections, allowing efficient Blueprint construction in a single call. Connections can reference nodes by array index or node ID.
+
+All modifications auto-compile the Blueprint. Engine Blueprints are protected from modification.
+
+### Viewport Capture
+
+The `capture_viewport` tool allows Claude to see what's happening in your editor or game:
+
+- **Automatic viewport selection**: Captures PIE (Play-In-Editor) viewport if running, otherwise captures the active editor viewport
+- **Optimized output**: Returns a 1024x576 JPEG image (quality 70) as base64
+- **No parameters required**: Just call the tool to get a screenshot
+
+This enables Claude to provide visual feedback, debug rendering issues, or verify that scene modifications were applied correctly.
 
 ## Configuration
 
@@ -213,7 +262,7 @@ Ensure you're on Unreal Engine 5.7 for Windows. This plugin uses Windows-specifi
 
 ### MCP Server not starting
 
-Check if port 8080 is available. The MCP server logs to `LogUnrealClaude`.
+Check if port 3000 is available. The MCP server logs to `LogUnrealClaude`.
 
 
 ## Known Limitations
@@ -230,6 +279,7 @@ Pull requests welcome! Areas for improvement:
 - [ ] Mac/Linux support
 - [ ] Streaming output display
 - [ ] Context menu integration (right-click on code)
+- [x] Blueprint node graph editing (add nodes, connect pins)
 - [ ] Blueprint node for runtime Claude queries
 - [ ] Additional MCP tools
 

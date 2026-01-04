@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Move/transform an actor
  */
-class FMCPTool_MoveActor : public IMCPTool
+class FMCPTool_MoveActor : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

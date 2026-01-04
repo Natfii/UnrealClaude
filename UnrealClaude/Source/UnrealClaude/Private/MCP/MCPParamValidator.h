@@ -74,6 +74,33 @@ public:
 	 */
 	static FString SanitizeString(const FString& Input);
 
+	/**
+	 * Validate a Blueprint asset path
+	 * Rejects engine Blueprints and invalid paths
+	 * @param BlueprintPath The Blueprint path to validate
+	 * @param OutError Error message if validation fails
+	 * @return true if valid, false otherwise
+	 */
+	static bool ValidateBlueprintPath(const FString& BlueprintPath, FString& OutError);
+
+	/**
+	 * Validate a Blueprint variable name
+	 * Must start with letter/underscore, contain only alphanumeric/underscore
+	 * @param VariableName The variable name to validate
+	 * @param OutError Error message if validation fails
+	 * @return true if valid, false otherwise
+	 */
+	static bool ValidateBlueprintVariableName(const FString& VariableName, FString& OutError);
+
+	/**
+	 * Validate a Blueprint function name
+	 * Same rules as variable names
+	 * @param FunctionName The function name to validate
+	 * @param OutError Error message if validation fails
+	 * @return true if valid, false otherwise
+	 */
+	static bool ValidateBlueprintFunctionName(const FString& FunctionName, FString& OutError);
+
 private:
 	/** Characters that are never allowed in actor names */
 	static const TCHAR* DangerousChars;

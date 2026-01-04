@@ -20,11 +20,12 @@ FMCPToolResult FMCPTool_SpawnActor::Execute(const TSharedRef<FJsonObject>& Param
 		return Error.GetValue();
 	}
 
-	// Get class path
+	// Extract and validate class path using base class helper
 	FString ClassPath;
-	if (!Params->TryGetStringField(TEXT("class"), ClassPath))
+	TOptional<FMCPToolResult> ParamError;
+	if (!ExtractRequiredString(Params, TEXT("class"), ClassPath, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: class"));
+		return ParamError.GetValue();
 	}
 
 	// Validate class path
@@ -34,52 +35,20 @@ FMCPToolResult FMCPTool_SpawnActor::Execute(const TSharedRef<FJsonObject>& Param
 		return FMCPToolResult::Error(ValidationError);
 	}
 
-	// Try to find the class
-	UClass* ActorClass = nullptr;
-
-	// First, try loading as a full path
-	ActorClass = LoadClass<AActor>(nullptr, *ClassPath);
-
-	// If not found, try common prefixes
+	// Load the actor class using base class helper (handles fallback prefixes)
+	UClass* ActorClass = LoadActorClass(ClassPath, ParamError);
 	if (!ActorClass)
 	{
-		// Try with /Script/Engine. prefix
-		ActorClass = LoadClass<AActor>(nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), *ClassPath));
+		return ParamError.GetValue();
 	}
 
-	if (!ActorClass)
-	{
-		// Try with /Script/CoreUObject. prefix
-		ActorClass = LoadClass<AActor>(nullptr, *FString::Printf(TEXT("/Script/CoreUObject.%s"), *ClassPath));
-	}
+	// Parse transform using base class helpers (consolidated transform extraction)
+	FVector Location = ExtractVectorParam(Params, TEXT("location"));
+	FRotator Rotation = ExtractRotatorParam(Params, TEXT("rotation"));
+	FVector Scale = ExtractScaleParam(Params, TEXT("scale"));
 
-	if (!ActorClass)
-	{
-		// Try finding by short name in any package
-		ActorClass = FindObject<UClass>(nullptr, *ClassPath);
-	}
-
-	if (!ActorClass)
-	{
-		return FMCPToolResult::Error(FString::Printf(TEXT("Could not find actor class: %s"), *ClassPath));
-	}
-
-	// Parse transform using shared utilities
-	const TSharedPtr<FJsonObject>* LocationObj = nullptr;
-	const TSharedPtr<FJsonObject>* RotationObj = nullptr;
-	const TSharedPtr<FJsonObject>* ScaleObj = nullptr;
-
-	Params->TryGetObjectField(TEXT("location"), LocationObj);
-	Params->TryGetObjectField(TEXT("rotation"), RotationObj);
-	Params->TryGetObjectField(TEXT("scale"), ScaleObj);
-
-	FVector Location = UnrealClaudeJsonUtils::ExtractVector(LocationObj ? *LocationObj : nullptr);
-	FRotator Rotation = UnrealClaudeJsonUtils::ExtractRotator(RotationObj ? *RotationObj : nullptr);
-	FVector Scale = UnrealClaudeJsonUtils::ExtractScale(ScaleObj ? *ScaleObj : nullptr);
-
-	// Get optional name
-	FString ActorName;
-	Params->TryGetStringField(TEXT("name"), ActorName);
+	// Get optional name using base class helper
+	FString ActorName = ExtractOptionalString(Params, TEXT("name"));
 
 	// Validate actor name if provided
 	if (!ActorName.IsEmpty())

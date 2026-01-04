@@ -18,25 +18,19 @@ FMCPToolResult FMCPTool_MoveActor::Execute(const TSharedRef<FJsonObject>& Params
 		return Error.GetValue();
 	}
 
-	// Get actor name
+	// Extract and validate actor name using base class helper
 	FString ActorName;
-	if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+	TOptional<FMCPToolResult> ParamError;
+	if (!ExtractActorName(Params, TEXT("actor_name"), ActorName, ParamError))
 	{
-		return FMCPToolResult::Error(TEXT("Missing required parameter: actor_name"));
-	}
-
-	// Validate actor name
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateActorName(ActorName, ValidationError))
-	{
-		return FMCPToolResult::Error(ValidationError);
+		return ParamError.GetValue();
 	}
 
 	// Find the actor using base class helper
 	AActor* Actor = FindActorByNameOrLabel(World, ActorName);
 	if (!Actor)
 	{
-		return FMCPToolResult::Error(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+		return ActorNotFoundError(ActorName);
 	}
 
 	// Get current transform
@@ -44,80 +38,41 @@ FMCPToolResult FMCPTool_MoveActor::Execute(const TSharedRef<FJsonObject>& Params
 	FRotator CurrentRotation = Actor->GetActorRotation();
 	FVector CurrentScale = Actor->GetActorScale3D();
 
-	// Check if relative mode
-	bool bRelative = false;
-	Params->TryGetBoolField(TEXT("relative"), bRelative);
+	// Check if relative mode using base class helper
+	bool bRelative = ExtractOptionalBool(Params, TEXT("relative"), false);
 
-	// Apply new location if provided
-	const TSharedPtr<FJsonObject>* LocationObj;
-	bool bLocationChanged = false;
-	if (Params->TryGetObjectField(TEXT("location"), LocationObj))
+	// Apply new location if provided (using base class transform helpers)
+	FVector NewLocation = CurrentLocation;
+	bool bLocationChanged = ExtractVectorComponents(Params, TEXT("location"), NewLocation, bRelative);
+	if (bLocationChanged)
 	{
-		FVector NewLocation;
-		if (bRelative)
-		{
-			NewLocation = CurrentLocation;
-			double Val;
-			if ((*LocationObj)->TryGetNumberField(TEXT("x"), Val)) NewLocation.X += Val;
-			if ((*LocationObj)->TryGetNumberField(TEXT("y"), Val)) NewLocation.Y += Val;
-			if ((*LocationObj)->TryGetNumberField(TEXT("z"), Val)) NewLocation.Z += Val;
-		}
-		else
-		{
-			NewLocation = CurrentLocation;
-			(*LocationObj)->TryGetNumberField(TEXT("x"), NewLocation.X);
-			(*LocationObj)->TryGetNumberField(TEXT("y"), NewLocation.Y);
-			(*LocationObj)->TryGetNumberField(TEXT("z"), NewLocation.Z);
-		}
 		Actor->SetActorLocation(NewLocation);
-		bLocationChanged = true;
 	}
 
-	// Apply new rotation if provided
-	const TSharedPtr<FJsonObject>* RotationObj;
-	bool bRotationChanged = false;
-	if (Params->TryGetObjectField(TEXT("rotation"), RotationObj))
+	// Apply new rotation if provided (using base class transform helpers)
+	FRotator NewRotation = CurrentRotation;
+	bool bRotationChanged = ExtractRotatorComponents(Params, TEXT("rotation"), NewRotation, bRelative);
+	if (bRotationChanged)
 	{
-		FRotator NewRotation;
-		if (bRelative)
-		{
-			NewRotation = CurrentRotation;
-			double Val;
-			if ((*RotationObj)->TryGetNumberField(TEXT("pitch"), Val)) NewRotation.Pitch += Val;
-			if ((*RotationObj)->TryGetNumberField(TEXT("yaw"), Val)) NewRotation.Yaw += Val;
-			if ((*RotationObj)->TryGetNumberField(TEXT("roll"), Val)) NewRotation.Roll += Val;
-		}
-		else
-		{
-			NewRotation = CurrentRotation;
-			(*RotationObj)->TryGetNumberField(TEXT("pitch"), NewRotation.Pitch);
-			(*RotationObj)->TryGetNumberField(TEXT("yaw"), NewRotation.Yaw);
-			(*RotationObj)->TryGetNumberField(TEXT("roll"), NewRotation.Roll);
-		}
 		Actor->SetActorRotation(NewRotation);
-		bRotationChanged = true;
 	}
 
 	// Apply new scale if provided
-	const TSharedPtr<FJsonObject>* ScaleObj;
+	// Note: Scale uses multiplicative relative mode, handled specially
+	FVector NewScale = CurrentScale;
 	bool bScaleChanged = false;
-	if (Params->TryGetObjectField(TEXT("scale"), ScaleObj))
+	if (HasVectorParam(Params, TEXT("scale")))
 	{
-		FVector NewScale;
 		if (bRelative)
 		{
-			NewScale = CurrentScale;
-			double Val;
-			if ((*ScaleObj)->TryGetNumberField(TEXT("x"), Val)) NewScale.X *= Val;
-			if ((*ScaleObj)->TryGetNumberField(TEXT("y"), Val)) NewScale.Y *= Val;
-			if ((*ScaleObj)->TryGetNumberField(TEXT("z"), Val)) NewScale.Z *= Val;
+			// Multiplicative scale for relative mode
+			FVector ScaleMultiplier = ExtractVectorParam(Params, TEXT("scale"), FVector::OneVector);
+			NewScale = CurrentScale * ScaleMultiplier;
 		}
 		else
 		{
-			NewScale = CurrentScale;
-			(*ScaleObj)->TryGetNumberField(TEXT("x"), NewScale.X);
-			(*ScaleObj)->TryGetNumberField(TEXT("y"), NewScale.Y);
-			(*ScaleObj)->TryGetNumberField(TEXT("z"), NewScale.Z);
+			// Absolute scale replacement
+			ExtractVectorComponents(Params, TEXT("scale"), NewScale, false);
 		}
 		Actor->SetActorScale3D(NewScale);
 		bScaleChanged = true;

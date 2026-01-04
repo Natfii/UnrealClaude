@@ -1,6 +1,7 @@
 // Copyright Your Name. All Rights Reserved.
 
 #include "JsonUtils.h"
+#include "UnrealClaudeUtils.h"
 
 FString FJsonUtils::Stringify(const TSharedPtr<FJsonObject>& JsonObject, bool bPrettyPrint)
 {
@@ -8,21 +9,7 @@ FString FJsonUtils::Stringify(const TSharedPtr<FJsonObject>& JsonObject, bool bP
 	{
 		return FString();
 	}
-
-	FString OutputString;
-	if (bPrettyPrint)
-	{
-		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
-		FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
-	}
-	else
-	{
-		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
-			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutputString);
-		FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
-	}
-
-	return OutputString;
+	return Stringify(JsonObject.ToSharedRef(), bPrettyPrint);
 }
 
 FString FJsonUtils::Stringify(const TSharedRef<FJsonObject>& JsonObject, bool bPrettyPrint)
@@ -39,7 +26,6 @@ FString FJsonUtils::Stringify(const TSharedRef<FJsonObject>& JsonObject, bool bP
 			TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutputString);
 		FJsonSerializer::Serialize(JsonObject, Writer);
 	}
-
 	return OutputString;
 }
 
@@ -183,117 +169,37 @@ TArray<FString> FJsonUtils::JsonArrayToStrings(const TArray<TSharedPtr<FJsonValu
 }
 
 // ===== Geometry Conversion Helpers =====
+// Forward to UnrealClaudeJsonUtils to avoid duplication
 
 TSharedPtr<FJsonObject> FJsonUtils::VectorToJson(const FVector& Vec)
 {
-	TSharedPtr<FJsonObject> JsonObj = MakeShared<FJsonObject>();
-	JsonObj->SetNumberField(TEXT("x"), Vec.X);
-	JsonObj->SetNumberField(TEXT("y"), Vec.Y);
-	JsonObj->SetNumberField(TEXT("z"), Vec.Z);
-	return JsonObj;
+	return UnrealClaudeJsonUtils::VectorToJson(Vec);
 }
 
 TSharedPtr<FJsonObject> FJsonUtils::RotatorToJson(const FRotator& Rot)
 {
-	TSharedPtr<FJsonObject> JsonObj = MakeShared<FJsonObject>();
-	JsonObj->SetNumberField(TEXT("pitch"), Rot.Pitch);
-	JsonObj->SetNumberField(TEXT("yaw"), Rot.Yaw);
-	JsonObj->SetNumberField(TEXT("roll"), Rot.Roll);
-	return JsonObj;
+	return UnrealClaudeJsonUtils::RotatorToJson(Rot);
 }
 
 TSharedPtr<FJsonObject> FJsonUtils::ScaleToJson(const FVector& Scale)
 {
-	// Same as VectorToJson, but semantically different
-	return VectorToJson(Scale);
+	return UnrealClaudeJsonUtils::VectorToJson(Scale);
 }
 
 bool FJsonUtils::JsonToVector(const TSharedPtr<FJsonObject>& JsonObject, FVector& OutVec)
 {
-	if (!JsonObject.IsValid())
-	{
-		return false;
-	}
-
-	OutVec = FVector::ZeroVector;
-	bool bParsedAny = false;
-
-	double Val;
-	if (JsonObject->TryGetNumberField(TEXT("x"), Val))
-	{
-		OutVec.X = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("y"), Val))
-	{
-		OutVec.Y = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("z"), Val))
-	{
-		OutVec.Z = Val;
-		bParsedAny = true;
-	}
-
-	return bParsedAny;
+	OutVec = UnrealClaudeJsonUtils::ExtractVector(JsonObject, FVector::ZeroVector);
+	return JsonObject.IsValid();
 }
 
 bool FJsonUtils::JsonToRotator(const TSharedPtr<FJsonObject>& JsonObject, FRotator& OutRot)
 {
-	if (!JsonObject.IsValid())
-	{
-		return false;
-	}
-
-	OutRot = FRotator::ZeroRotator;
-	bool bParsedAny = false;
-
-	double Val;
-	if (JsonObject->TryGetNumberField(TEXT("pitch"), Val))
-	{
-		OutRot.Pitch = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("yaw"), Val))
-	{
-		OutRot.Yaw = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("roll"), Val))
-	{
-		OutRot.Roll = Val;
-		bParsedAny = true;
-	}
-
-	return bParsedAny;
+	OutRot = UnrealClaudeJsonUtils::ExtractRotator(JsonObject, FRotator::ZeroRotator);
+	return JsonObject.IsValid();
 }
 
 bool FJsonUtils::JsonToScale(const TSharedPtr<FJsonObject>& JsonObject, FVector& OutScale)
 {
-	if (!JsonObject.IsValid())
-	{
-		return false;
-	}
-
-	OutScale = FVector::OneVector; // Default scale is 1,1,1
-	bool bParsedAny = false;
-
-	double Val;
-	if (JsonObject->TryGetNumberField(TEXT("x"), Val))
-	{
-		OutScale.X = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("y"), Val))
-	{
-		OutScale.Y = Val;
-		bParsedAny = true;
-	}
-	if (JsonObject->TryGetNumberField(TEXT("z"), Val))
-	{
-		OutScale.Z = Val;
-		bParsedAny = true;
-	}
-
-	return bParsedAny;
+	OutScale = UnrealClaudeJsonUtils::ExtractScale(JsonObject, FVector::OneVector);
+	return JsonObject.IsValid();
 }

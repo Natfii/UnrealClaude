@@ -132,6 +132,15 @@ private:
 	/** Register all built-in tools */
 	void RegisterBuiltinTools();
 
+	/** Invalidate cached tool list */
+	void InvalidateToolCache();
+
 	/** Map of tool name to tool instance */
 	TMap<FString, TSharedPtr<IMCPTool>> Tools;
+
+	/** Cached tool info list for performance */
+	mutable TArray<FMCPToolInfo> CachedToolInfo;
+
+	/** Whether the cached tool list is valid */
+	mutable bool bCacheValid = false;
 };

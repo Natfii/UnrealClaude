@@ -271,3 +271,114 @@ FString FMCPParamValidator::SanitizeString(const FString& Input)
 
 	return Sanitized;
 }
+
+bool FMCPParamValidator::ValidateBlueprintPath(const FString& BlueprintPath, FString& OutError)
+{
+	if (BlueprintPath.IsEmpty())
+	{
+		OutError = TEXT("Blueprint path cannot be empty");
+		return false;
+	}
+
+	if (BlueprintPath.Len() > 512)
+	{
+		OutError = TEXT("Blueprint path exceeds maximum length of 512 characters");
+		return false;
+	}
+
+	// Block engine Blueprints
+	if (BlueprintPath.StartsWith(TEXT("/Engine/")) || BlueprintPath.StartsWith(TEXT("/Script/")))
+	{
+		OutError = TEXT("Cannot access engine or script Blueprints");
+		return false;
+	}
+
+	// Check for path traversal
+	if (BlueprintPath.Contains(TEXT("..")))
+	{
+		OutError = TEXT("Blueprint path cannot contain path traversal sequences");
+		return false;
+	}
+
+	// Check for dangerous characters
+	const TCHAR* PathDangerousChars = TEXT("<>|&;`$(){}[]!*?~");
+	for (const TCHAR* c = PathDangerousChars; *c; ++c)
+	{
+		if (BlueprintPath.Contains(FString(1, c)))
+		{
+			OutError = FString::Printf(TEXT("Blueprint path contains invalid character: '%c'"), *c);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMCPParamValidator::ValidateBlueprintVariableName(const FString& VariableName, FString& OutError)
+{
+	if (VariableName.IsEmpty())
+	{
+		OutError = TEXT("Variable name cannot be empty");
+		return false;
+	}
+
+	if (VariableName.Len() > 128)
+	{
+		OutError = TEXT("Variable name exceeds maximum length of 128 characters");
+		return false;
+	}
+
+	// Must start with letter or underscore
+	if (!FChar::IsAlpha(VariableName[0]) && VariableName[0] != TEXT('_'))
+	{
+		OutError = TEXT("Variable name must start with a letter or underscore");
+		return false;
+	}
+
+	// Only alphanumeric and underscore
+	for (TCHAR C : VariableName)
+	{
+		if (!FChar::IsAlnum(C) && C != TEXT('_'))
+		{
+			OutError = FString::Printf(TEXT("Variable name contains invalid character: '%c'"), C);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FMCPParamValidator::ValidateBlueprintFunctionName(const FString& FunctionName, FString& OutError)
+{
+	// Same validation rules as variable names
+	if (FunctionName.IsEmpty())
+	{
+		OutError = TEXT("Function name cannot be empty");
+		return false;
+	}
+
+	if (FunctionName.Len() > 128)
+	{
+		OutError = TEXT("Function name exceeds maximum length of 128 characters");
+		return false;
+	}
+
+	// Must start with letter or underscore
+	if (!FChar::IsAlpha(FunctionName[0]) && FunctionName[0] != TEXT('_'))
+	{
+		OutError = TEXT("Function name must start with a letter or underscore");
+		return false;
+	}
+
+	// Only alphanumeric and underscore
+	for (TCHAR C : FunctionName)
+	{
+		if (!FChar::IsAlnum(C) && C != TEXT('_'))
+		{
+			OutError = FString::Printf(TEXT("Function name contains invalid character: '%c'"), C);
+			return false;
+		}
+	}
+
+	return true;
+}

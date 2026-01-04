@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolRegistry.h"
+#include "../MCPToolBase.h"
 
 /**
  * MCP Tool: Spawn an actor in the current level
  */
-class FMCPTool_SpawnActor : public IMCPTool
+class FMCPTool_SpawnActor : public FMCPToolBase
 {
 public:
 	virtual FMCPToolInfo GetInfo() const override

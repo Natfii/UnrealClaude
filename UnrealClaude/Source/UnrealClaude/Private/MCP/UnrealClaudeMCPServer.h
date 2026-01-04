@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
+#include "UnrealClaudeConstants.h"
 
 class FMCPToolRegistry;
 
@@ -19,7 +20,7 @@ public:
 	~FUnrealClaudeMCPServer();
 
 	/** Start the MCP server on the specified port */
-	bool Start(uint32 Port = 3000);
+	bool Start(uint32 Port = UnrealClaudeConstants::MCPServer::DefaultPort);
 
 	/** Stop the MCP server */
 	void Stop();
