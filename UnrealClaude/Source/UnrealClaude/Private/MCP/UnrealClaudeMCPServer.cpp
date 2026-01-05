@@ -193,10 +193,15 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 	TSharedPtr<FJsonObject> ParamsJson;
 	if (Request.Body.Num() > 0)
 	{
-		FString BodyString = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Request.Body.GetData())));
+		// Ensure null-termination for safe string conversion
+		TArray<uint8> NullTerminatedBody = Request.Body;
+		NullTerminatedBody.Add(0);
+		FString BodyString = UTF8_TO_TCHAR(reinterpret_cast<const char*>(NullTerminatedBody.GetData()));
+
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyString);
 		if (!FJsonSerializer::Deserialize(Reader, ParamsJson) || !ParamsJson.IsValid())
 		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse JSON body: %s"), *BodyString);
 			OnComplete(CreateErrorResponse(TEXT("Invalid JSON body"), EHttpServerResponseCodes::BadRequest));
 			return true;
 		}
@@ -242,6 +247,20 @@ bool FUnrealClaudeMCPServer::HandleStatus(const FHttpServerRequest& Request, con
 	ResponseJson->SetNumberField(TEXT("port"), ServerPort);
 	ResponseJson->SetStringField(TEXT("version"), TEXT("1.0.0"));
 	ResponseJson->SetNumberField(TEXT("toolCount"), ToolRegistry.IsValid() ? ToolRegistry->GetAllTools().Num() : 0);
+
+	// Add list of available tools
+	if (ToolRegistry.IsValid())
+	{
+		TArray<TSharedPtr<FJsonValue>> ToolsArray;
+		for (const FMCPToolInfo& ToolInfo : ToolRegistry->GetAllTools())
+		{
+			TSharedPtr<FJsonObject> ToolObj = MakeShared<FJsonObject>();
+			ToolObj->SetStringField(TEXT("name"), ToolInfo.Name);
+			ToolObj->SetStringField(TEXT("description"), ToolInfo.Description);
+			ToolsArray.Add(MakeShared<FJsonValueObject>(ToolObj));
+		}
+		ResponseJson->SetArrayField(TEXT("tools"), ToolsArray);
+	}
 
 	// Add project info
 	ResponseJson->SetStringField(TEXT("projectName"), FApp::GetProjectName());

@@ -52,7 +52,10 @@ public class UnrealClaude : ModuleRules
 				"BlueprintGraph",
 				"GraphEditor",
 				"AssetRegistry",
-				"AssetTools"
+				"AssetTools",
+				// Animation Blueprint manipulation
+				"AnimGraph",
+				"AnimGraphRuntime"
 			}
 		);
 

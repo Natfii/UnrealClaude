@@ -164,6 +164,36 @@ The `blueprint_modify` tool supports:
 
 All modifications auto-compile the Blueprint after changes.
 
+#### Animation Blueprint Tools
+
+| Tool | Description |
+|------|-------------|
+| `anim_blueprint_modify` | Modify Animation Blueprints (state machines, states, transitions, anim nodes) |
+
+The `anim_blueprint_modify` tool supports state machine editing:
+
+**State Machine Operations:**
+- `create` - Create new state machine in an Animation Blueprint
+- `delete` - Delete a state machine
+- `rename` - Rename a state machine
+- `set_entry_state` - Set the default entry state
+- `list` - List all state machines in an Animation Blueprint
+
+**State Operations:**
+- `create` - Create a new state in a state machine
+- `delete` - Delete a state
+- `rename` - Rename a state
+
+**Transition Operations:**
+- `create` - Create a transition between two states
+- `delete` - Delete a transition
+
+**Animation Node Operations:**
+- `add` - Add animation nodes (play_sequence, blend_space, state_result)
+- `delete` - Delete animation nodes from state graphs
+
+All modifications auto-compile the Animation Blueprint after changes.
+
 #### Utility Tools
 
 | Tool | Description |

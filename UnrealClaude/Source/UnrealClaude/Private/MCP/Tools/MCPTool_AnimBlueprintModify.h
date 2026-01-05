@@ -1,0 +1,108 @@
+// Copyright Your Name. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "../MCPToolBase.h"
+
+/**
+ * MCP Tool: Animation Blueprint Modification
+ *
+ * Provides comprehensive control over Animation Blueprints including:
+ * - State machine management (create, query)
+ * - State operations (add, remove, list)
+ * - Transition operations (add, remove, configure duration/priority)
+ * - Transition condition graphs (add condition nodes, connect, delete nodes)
+ * - Animation assignment (AnimSequence, BlendSpace, BlendSpace1D, Montage)
+ *
+ * Operations:
+ * - get_info: Get AnimBlueprint structure overview
+ * - get_state_machine: Get detailed state machine info
+ * - create_state_machine: Create new state machine
+ * - add_state: Add state to state machine
+ * - remove_state: Remove state from state machine
+ * - add_transition: Create transition between states
+ * - remove_transition: Remove transition
+ * - set_transition_duration: Set blend duration
+ * - set_transition_priority: Set transition priority
+ * - add_condition_node: Add node to transition graph (fully supported)
+ * - delete_condition_node: Remove node from transition graph
+ * - connect_condition_nodes: Connect nodes in transition graph
+ * - connect_to_result: Connect condition to transition result
+ * - set_state_animation: Assign animation to state
+ * - find_animations: Search for compatible animation assets
+ * - batch: Execute multiple operations atomically
+ *
+ * Supported Condition Node Types (add_condition_node):
+ * - TimeRemaining: Gets time remaining in current animation (output: float)
+ * - Greater: Float comparison A > B (inputs: A, B; output: bool)
+ * - Less: Float comparison A < B
+ * - GreaterEqual: Float comparison A >= B
+ * - LessEqual: Float comparison A <= B
+ * - Equal: Float comparison A == B
+ * - NotEqual: Float comparison A != B
+ * - And: Boolean AND (inputs: A, B; output: bool)
+ * - Or: Boolean OR (inputs: A, B; output: bool)
+ * - Not: Boolean NOT (input: A; output: bool)
+ * - GetVariable: Get blueprint variable (node_params: {variable_name})
+ */
+class FMCPTool_AnimBlueprintModify : public FMCPToolBase
+{
+public:
+	virtual FMCPToolInfo GetInfo() const override
+	{
+		FMCPToolInfo Info;
+		Info.Name = TEXT("anim_blueprint_modify");
+		Info.Description = TEXT("Modify Animation Blueprints: state machines, states, transitions, conditions, and animation assignments. Supports full transition condition logic with comparisons and boolean operations.");
+		Info.Parameters = {
+			FMCPToolParameter(TEXT("blueprint_path"), TEXT("string"), TEXT("Path to the Animation Blueprint (e.g., '/Game/Characters/ABP_Character')"), true),
+			FMCPToolParameter(TEXT("operation"), TEXT("string"), TEXT("Operation: get_info, get_state_machine, create_state_machine, add_state, remove_state, add_transition, remove_transition, set_transition_duration, set_transition_priority, add_condition_node, delete_condition_node, connect_condition_nodes, connect_to_result, set_state_animation, find_animations, batch"), true),
+			FMCPToolParameter(TEXT("state_machine"), TEXT("string"), TEXT("State machine name (for state/transition operations)"), false),
+			FMCPToolParameter(TEXT("state_name"), TEXT("string"), TEXT("State name (for state operations)"), false),
+			FMCPToolParameter(TEXT("from_state"), TEXT("string"), TEXT("Source state name (for transitions)"), false),
+			FMCPToolParameter(TEXT("to_state"), TEXT("string"), TEXT("Target state name (for transitions)"), false),
+			FMCPToolParameter(TEXT("position"), TEXT("object"), TEXT("Node position {x, y}"), false, TEXT("{\"x\":0,\"y\":0}")),
+			FMCPToolParameter(TEXT("is_entry_state"), TEXT("boolean"), TEXT("Whether this state is the entry state"), false, TEXT("false")),
+			FMCPToolParameter(TEXT("duration"), TEXT("number"), TEXT("Transition blend duration in seconds"), false),
+			FMCPToolParameter(TEXT("priority"), TEXT("number"), TEXT("Transition priority (higher = checked first)"), false),
+			FMCPToolParameter(TEXT("node_type"), TEXT("string"), TEXT("Condition node type: TimeRemaining, Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual, And, Or, Not, GetVariable"), false),
+			FMCPToolParameter(TEXT("node_params"), TEXT("object"), TEXT("Condition node parameters (e.g., {variable_name} for GetVariable)"), false),
+			FMCPToolParameter(TEXT("node_id"), TEXT("string"), TEXT("Node ID for delete_condition_node operation"), false),
+			FMCPToolParameter(TEXT("source_node_id"), TEXT("string"), TEXT("Source node ID for connection"), false),
+			FMCPToolParameter(TEXT("source_pin"), TEXT("string"), TEXT("Source pin name"), false),
+			FMCPToolParameter(TEXT("target_node_id"), TEXT("string"), TEXT("Target node ID for connection"), false),
+			FMCPToolParameter(TEXT("target_pin"), TEXT("string"), TEXT("Target pin name"), false),
+			FMCPToolParameter(TEXT("animation_type"), TEXT("string"), TEXT("Animation type: sequence, blendspace, blendspace1d, montage"), false),
+			FMCPToolParameter(TEXT("animation_path"), TEXT("string"), TEXT("Path to animation asset"), false),
+			FMCPToolParameter(TEXT("parameter_bindings"), TEXT("object"), TEXT("BlendSpace parameter bindings {\"X\": \"Speed\", \"Y\": \"Direction\"}"), false),
+			FMCPToolParameter(TEXT("search_pattern"), TEXT("string"), TEXT("Animation search pattern (for find_animations)"), false),
+			FMCPToolParameter(TEXT("asset_type"), TEXT("string"), TEXT("Asset type filter: AnimSequence, BlendSpace, BlendSpace1D, Montage, All"), false, TEXT("All")),
+			FMCPToolParameter(TEXT("operations"), TEXT("array"), TEXT("Array of operations for batch mode"), false)
+		};
+		return Info;
+	}
+
+	virtual FMCPToolResult Execute(const TSharedRef<FJsonObject>& Params) override;
+
+private:
+	// Operation handlers
+	FMCPToolResult HandleGetInfo(const FString& BlueprintPath);
+	FMCPToolResult HandleGetStateMachine(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleCreateStateMachine(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleAddState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleRemoveState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleAddTransition(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleRemoveTransition(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleSetTransitionDuration(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleSetTransitionPriority(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleAddConditionNode(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleDeleteConditionNode(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleConnectConditionNodes(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleConnectToResult(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleSetStateAnimation(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleFindAnimations(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleBatch(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+
+	// Helper to extract position
+	FVector2D ExtractPosition(const TSharedRef<FJsonObject>& Params);
+};
