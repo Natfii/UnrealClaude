@@ -128,6 +128,13 @@ public:
 	/** Check if a tool exists */
 	bool HasTool(const FString& ToolName) const;
 
+	/** Find a tool by name (returns nullptr if not found) */
+	IMCPTool* FindTool(const FString& ToolName) const
+	{
+		const TSharedPtr<IMCPTool>* Found = Tools.Find(ToolName);
+		return Found && Found->IsValid() ? Found->Get() : nullptr;
+	}
+
 private:
 	/** Register all built-in tools */
 	void RegisterBuiltinTools();

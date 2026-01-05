@@ -24,10 +24,13 @@ PluginBuild/
 *.cachefile
 
 # Node.js (for MCP bridge)
+# Ignore node_modules everywhere EXCEPT the mcp-bridge (needed for distribution)
 node_modules/
+!UnrealClaude/Resources/mcp-bridge/node_modules/
 npm-debug.log
 yarn-error.log
-package-lock.json
+# Keep package-lock.json for reproducible builds
+# package-lock.json
 
 # Claude Code session data
 .claude/
@@ -43,7 +46,6 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 *.lnk
-nul
 
 # Temporary files
 *.tmp
@@ -51,6 +53,20 @@ nul
 *.log
 *.bak
 *~
+
+# Test artifacts and output
+TestResults/
+AutomationTest/
+**/Saved/Automation/
+**/Saved/Logs/
+*.automation.json
+TestReport*.xml
+TestReport*.html
+coverage/
+*.coverage
+*.gcov
+*.gcda
+*.gcno
 
 # Debug symbols (optional - can include for debugging)
 # *.pdb

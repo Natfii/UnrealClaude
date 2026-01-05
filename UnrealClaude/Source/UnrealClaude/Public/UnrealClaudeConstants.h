@@ -145,7 +145,8 @@ namespace UnrealClaudeConstants
 			TEXT("cleanup_scripts"),
 			TEXT("get_script_history"),
 			TEXT("blueprint_query"),
-			TEXT("blueprint_modify")
+			TEXT("blueprint_modify"),
+			TEXT("anim_blueprint_modify")
 		};
 	}
 }

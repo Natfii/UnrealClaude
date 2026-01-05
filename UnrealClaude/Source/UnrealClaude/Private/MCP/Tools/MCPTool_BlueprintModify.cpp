@@ -3,8 +3,25 @@
 #include "MCPTool_BlueprintModify.h"
 #include "BlueprintUtils.h"
 #include "MCP/MCPParamValidator.h"
+#include "MCP/MCPBlueprintLoadContext.h"
 #include "UnrealClaudeModule.h"
 #include "Engine/Blueprint.h"
+
+// Operation name constants
+namespace BlueprintModifyOps
+{
+	static const FString Create = TEXT("create");
+	static const FString AddVariable = TEXT("add_variable");
+	static const FString RemoveVariable = TEXT("remove_variable");
+	static const FString AddFunction = TEXT("add_function");
+	static const FString RemoveFunction = TEXT("remove_function");
+	static const FString AddNode = TEXT("add_node");
+	static const FString AddNodes = TEXT("add_nodes");
+	static const FString DeleteNode = TEXT("delete_node");
+	static const FString ConnectPins = TEXT("connect_pins");
+	static const FString DisconnectPins = TEXT("disconnect_pins");
+	static const FString SetPinValue = TEXT("set_pin_value");
+}
 
 FMCPToolResult FMCPTool_BlueprintModify::Execute(const TSharedRef<FJsonObject>& Params)
 {
@@ -19,49 +36,49 @@ FMCPToolResult FMCPTool_BlueprintModify::Execute(const TSharedRef<FJsonObject>& 
 	Operation = Operation.ToLower();
 
 	// Level 2: Variable/Function Operations
-	if (Operation == TEXT("create"))
+	if (Operation == BlueprintModifyOps::Create)
 	{
 		return ExecuteCreate(Params);
 	}
-	else if (Operation == TEXT("add_variable"))
+	if (Operation == BlueprintModifyOps::AddVariable)
 	{
 		return ExecuteAddVariable(Params);
 	}
-	else if (Operation == TEXT("remove_variable"))
+	if (Operation == BlueprintModifyOps::RemoveVariable)
 	{
 		return ExecuteRemoveVariable(Params);
 	}
-	else if (Operation == TEXT("add_function"))
+	if (Operation == BlueprintModifyOps::AddFunction)
 	{
 		return ExecuteAddFunction(Params);
 	}
-	else if (Operation == TEXT("remove_function"))
+	if (Operation == BlueprintModifyOps::RemoveFunction)
 	{
 		return ExecuteRemoveFunction(Params);
 	}
 	// Level 3: Node Operations
-	else if (Operation == TEXT("add_node"))
+	if (Operation == BlueprintModifyOps::AddNode)
 	{
 		return ExecuteAddNode(Params);
 	}
-	else if (Operation == TEXT("add_nodes"))
+	if (Operation == BlueprintModifyOps::AddNodes)
 	{
 		return ExecuteAddNodes(Params);
 	}
-	else if (Operation == TEXT("delete_node"))
+	if (Operation == BlueprintModifyOps::DeleteNode)
 	{
 		return ExecuteDeleteNode(Params);
 	}
 	// Level 4: Connection Operations
-	else if (Operation == TEXT("connect_pins"))
+	if (Operation == BlueprintModifyOps::ConnectPins)
 	{
 		return ExecuteConnectPins(Params);
 	}
-	else if (Operation == TEXT("disconnect_pins"))
+	if (Operation == BlueprintModifyOps::DisconnectPins)
 	{
 		return ExecuteDisconnectPins(Params);
 	}
-	else if (Operation == TEXT("set_pin_value"))
+	if (Operation == BlueprintModifyOps::SetPinValue)
 	{
 		return ExecuteSetPinValue(Params);
 	}
@@ -151,13 +168,7 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteCreate(const TSharedRef<FJsonObj
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddVariable(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString VariableName;
 	if (!ExtractRequiredString(Params, TEXT("variable_name"), VariableName, Error))
 	{
@@ -170,32 +181,18 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddVariable(const TSharedRef<FJs
 		return Error.GetValue();
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
-	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
 	// Validate variable name
+	FString ValidationError;
 	if (!FMCPParamValidator::ValidateBlueprintVariableName(VariableName, ValidationError))
 	{
 		return FMCPToolResult::Error(ValidationError);
 	}
 
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Parse variable type
@@ -208,28 +205,21 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddVariable(const TSharedRef<FJs
 
 	// Add the variable
 	FString AddError;
-	if (!FBlueprintUtils::AddVariable(Blueprint, VariableName, PinType, AddError))
+	if (!FBlueprintUtils::AddVariable(Context.Blueprint, VariableName, PinType, AddError))
 	{
 		return FMCPToolResult::Error(AddError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Variable added")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Variable added but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("variable_name"), VariableName);
 	ResultData->SetStringField(TEXT("variable_type"), VariableType);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Added variable '%s' (%s) to Blueprint"), *VariableName, *VariableType),
@@ -240,64 +230,36 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddVariable(const TSharedRef<FJs
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteRemoveVariable(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString VariableName;
 	if (!ExtractRequiredString(Params, TEXT("variable_name"), VariableName, Error))
 	{
 		return Error.GetValue();
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Remove the variable
 	FString RemoveError;
-	if (!FBlueprintUtils::RemoveVariable(Blueprint, VariableName, RemoveError))
+	if (!FBlueprintUtils::RemoveVariable(Context.Blueprint, VariableName, RemoveError))
 	{
 		return FMCPToolResult::Error(RemoveError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Variable removed")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Variable removed but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("variable_name"), VariableName);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Removed variable '%s' from Blueprint"), *VariableName),
@@ -308,70 +270,43 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteRemoveVariable(const TSharedRef<
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddFunction(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString FunctionName;
 	if (!ExtractRequiredString(Params, TEXT("function_name"), FunctionName, Error))
 	{
 		return Error.GetValue();
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
-	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
 	// Validate function name
+	FString ValidationError;
 	if (!FMCPParamValidator::ValidateBlueprintFunctionName(FunctionName, ValidationError))
 	{
 		return FMCPToolResult::Error(ValidationError);
 	}
 
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Add the function
 	FString AddError;
-	if (!FBlueprintUtils::AddFunction(Blueprint, FunctionName, AddError))
+	if (!FBlueprintUtils::AddFunction(Context.Blueprint, FunctionName, AddError))
 	{
 		return FMCPToolResult::Error(AddError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Function added")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Function added but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("function_name"), FunctionName);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Added function '%s' to Blueprint"), *FunctionName),
@@ -382,64 +317,36 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddFunction(const TSharedRef<FJs
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteRemoveFunction(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString FunctionName;
 	if (!ExtractRequiredString(Params, TEXT("function_name"), FunctionName, Error))
 	{
 		return Error.GetValue();
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Remove the function
 	FString RemoveError;
-	if (!FBlueprintUtils::RemoveFunction(Blueprint, FunctionName, RemoveError))
+	if (!FBlueprintUtils::RemoveFunction(Context.Blueprint, FunctionName, RemoveError))
 	{
 		return FMCPToolResult::Error(RemoveError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Function removed")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Function removed but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("function_name"), FunctionName);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Removed function '%s' from Blueprint"), *FunctionName),
@@ -477,13 +384,7 @@ EBlueprintType FMCPTool_BlueprintModify::ParseBlueprintType(const FString& TypeS
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNode(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString NodeType;
 	if (!ExtractRequiredString(Params, TEXT("node_type"), NodeType, Error))
 	{
@@ -503,31 +404,16 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNode(const TSharedRef<FJsonOb
 		NodeParams = *NodeParamsPtr;
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
@@ -555,26 +441,20 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNode(const TSharedRef<FJsonOb
 				{
 					FString PinError;
 					FBlueprintUtils::SetPinDefaultValue(Graph, NodeId, PinValue.Key, PinValueStr, PinError);
-					// Continue even if pin value setting fails (non-fatal)
 				}
 			}
 		}
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Node created")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Node created but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
-
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
 
 	// Build result
 	TSharedPtr<FJsonObject> ResultData = FBlueprintUtils::SerializeNodeInfo(NewNode);
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	ResultData->SetStringField(TEXT("blueprint_path"), Context.Blueprint->GetPathName());
 	ResultData->SetStringField(TEXT("graph_name"), Graph->GetName());
 
 	return FMCPToolResult::Success(
@@ -586,13 +466,6 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNode(const TSharedRef<FJsonOb
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNodes(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
-	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString GraphName = ExtractOptionalString(Params, TEXT("graph_name"), TEXT(""));
 	bool bFunctionGraph = ExtractOptionalBool(Params, TEXT("is_function_graph"), false);
 
@@ -603,52 +476,76 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNodes(const TSharedRef<FJsonO
 		return FMCPToolResult::Error(TEXT("'nodes' array is required"));
 	}
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
 	}
 
-	// Create all nodes
+	// Create all nodes using helper
 	TArray<FString> CreatedNodeIds;
 	TArray<TSharedPtr<FJsonValue>> CreatedNodes;
+	FString CreateError;
+	if (!CreateNodesFromSpec(Graph, *NodesArray, CreatedNodeIds, CreatedNodes, CreateError))
+	{
+		return FMCPToolResult::Error(CreateError);
+	}
 
-	for (int32 i = 0; i < NodesArray->Num(); i++)
+	// Process connections using helper
+	const TArray<TSharedPtr<FJsonValue>>* ConnectionsArray;
+	if (Params->TryGetArrayField(TEXT("connections"), ConnectionsArray))
+	{
+		ProcessNodeConnections(Graph, *ConnectionsArray, CreatedNodeIds);
+	}
+
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Nodes created")))
+	{
+		return CompileError.GetValue();
+	}
+
+	// Build result
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
+	ResultData->SetStringField(TEXT("graph_name"), Graph->GetName());
+	ResultData->SetArrayField(TEXT("nodes"), CreatedNodes);
+	ResultData->SetNumberField(TEXT("node_count"), CreatedNodeIds.Num());
+
+	return FMCPToolResult::Success(
+		FString::Printf(TEXT("Created %d nodes"), CreatedNodeIds.Num()),
+		ResultData
+	);
+}
+
+bool FMCPTool_BlueprintModify::CreateNodesFromSpec(
+	UEdGraph* Graph,
+	const TArray<TSharedPtr<FJsonValue>>& NodesArray,
+	TArray<FString>& OutCreatedNodeIds,
+	TArray<TSharedPtr<FJsonValue>>& OutCreatedNodes,
+	FString& OutError)
+{
+	for (int32 i = 0; i < NodesArray.Num(); i++)
 	{
 		const TSharedPtr<FJsonObject>* NodeSpec;
-		if (!(*NodesArray)[i]->TryGetObject(NodeSpec))
+		if (!NodesArray[i]->TryGetObject(NodeSpec))
 		{
-			return FMCPToolResult::Error(FString::Printf(TEXT("Node at index %d is not a valid object"), i));
+			OutError = FString::Printf(TEXT("Node at index %d is not a valid object"), i);
+			return false;
 		}
 
 		FString NodeType = (*NodeSpec)->GetStringField(TEXT("type"));
 		if (NodeType.IsEmpty())
 		{
-			return FMCPToolResult::Error(FString::Printf(TEXT("Node at index %d missing 'type' field"), i));
+			OutError = FString::Printf(TEXT("Node at index %d missing 'type' field"), i);
+			return false;
 		}
 
 		int32 PosX = (int32)(*NodeSpec)->GetNumberField(TEXT("pos_x"));
@@ -682,10 +579,11 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNodes(const TSharedRef<FJsonO
 		UEdGraphNode* NewNode = FBlueprintUtils::CreateNode(Graph, NodeType, NodeParams, PosX, PosY, NodeId, CreateError);
 		if (!NewNode)
 		{
-			return FMCPToolResult::Error(FString::Printf(TEXT("Failed to create node %d: %s"), i, *CreateError));
+			OutError = FString::Printf(TEXT("Failed to create node %d: %s"), i, *CreateError);
+			return false;
 		}
 
-		CreatedNodeIds.Add(NodeId);
+		OutCreatedNodeIds.Add(NodeId);
 
 		// Apply pin default values if provided
 		const TSharedPtr<FJsonObject>* PinValuesPtr;
@@ -705,97 +603,70 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNodes(const TSharedRef<FJsonO
 		// Add to result
 		TSharedPtr<FJsonObject> NodeInfo = FBlueprintUtils::SerializeNodeInfo(NewNode);
 		NodeInfo->SetNumberField(TEXT("index"), i);
-		CreatedNodes.Add(MakeShared<FJsonValueObject>(NodeInfo));
+		OutCreatedNodes.Add(MakeShared<FJsonValueObject>(NodeInfo));
 	}
 
-	// Process connections
-	const TArray<TSharedPtr<FJsonValue>>* ConnectionsArray;
-	if (Params->TryGetArrayField(TEXT("connections"), ConnectionsArray))
+	return true;
+}
+
+void FMCPTool_BlueprintModify::ProcessNodeConnections(
+	UEdGraph* Graph,
+	const TArray<TSharedPtr<FJsonValue>>& ConnectionsArray,
+	const TArray<FString>& CreatedNodeIds)
+{
+	for (int32 i = 0; i < ConnectionsArray.Num(); i++)
 	{
-		for (int32 i = 0; i < ConnectionsArray->Num(); i++)
+		const TSharedPtr<FJsonObject>* ConnSpec;
+		if (!ConnectionsArray[i]->TryGetObject(ConnSpec))
 		{
-			const TSharedPtr<FJsonObject>* ConnSpec;
-			if (!(*ConnectionsArray)[i]->TryGetObject(ConnSpec))
-			{
-				continue;
-			}
+			continue;
+		}
 
-			// Get source - can be index or node_id
-			FString SourceNodeId;
-			if ((*ConnSpec)->HasTypedField<EJson::Number>(TEXT("from_node")))
+		// Get source - can be index or node_id
+		FString SourceNodeId;
+		if ((*ConnSpec)->HasTypedField<EJson::Number>(TEXT("from_node")))
+		{
+			int32 FromIndex = (int32)(*ConnSpec)->GetNumberField(TEXT("from_node"));
+			if (FromIndex >= 0 && FromIndex < CreatedNodeIds.Num())
 			{
-				int32 FromIndex = (int32)(*ConnSpec)->GetNumberField(TEXT("from_node"));
-				if (FromIndex >= 0 && FromIndex < CreatedNodeIds.Num())
-				{
-					SourceNodeId = CreatedNodeIds[FromIndex];
-				}
-			}
-			else if ((*ConnSpec)->HasTypedField<EJson::String>(TEXT("from_node")))
-			{
-				SourceNodeId = (*ConnSpec)->GetStringField(TEXT("from_node"));
-			}
-
-			// Get target - can be index or node_id
-			FString TargetNodeId;
-			if ((*ConnSpec)->HasTypedField<EJson::Number>(TEXT("to_node")))
-			{
-				int32 ToIndex = (int32)(*ConnSpec)->GetNumberField(TEXT("to_node"));
-				if (ToIndex >= 0 && ToIndex < CreatedNodeIds.Num())
-				{
-					TargetNodeId = CreatedNodeIds[ToIndex];
-				}
-			}
-			else if ((*ConnSpec)->HasTypedField<EJson::String>(TEXT("to_node")))
-			{
-				TargetNodeId = (*ConnSpec)->GetStringField(TEXT("to_node"));
-			}
-
-			FString SourcePin = (*ConnSpec)->GetStringField(TEXT("from_pin"));
-			FString TargetPin = (*ConnSpec)->GetStringField(TEXT("to_pin"));
-
-			if (!SourceNodeId.IsEmpty() && !TargetNodeId.IsEmpty())
-			{
-				FString ConnectError;
-				FBlueprintUtils::ConnectPins(Graph, SourceNodeId, SourcePin, TargetNodeId, TargetPin, ConnectError);
-				// Continue even if connection fails (non-fatal)
+				SourceNodeId = CreatedNodeIds[FromIndex];
 			}
 		}
+		else if ((*ConnSpec)->HasTypedField<EJson::String>(TEXT("from_node")))
+		{
+			SourceNodeId = (*ConnSpec)->GetStringField(TEXT("from_node"));
+		}
+
+		// Get target - can be index or node_id
+		FString TargetNodeId;
+		if ((*ConnSpec)->HasTypedField<EJson::Number>(TEXT("to_node")))
+		{
+			int32 ToIndex = (int32)(*ConnSpec)->GetNumberField(TEXT("to_node"));
+			if (ToIndex >= 0 && ToIndex < CreatedNodeIds.Num())
+			{
+				TargetNodeId = CreatedNodeIds[ToIndex];
+			}
+		}
+		else if ((*ConnSpec)->HasTypedField<EJson::String>(TEXT("to_node")))
+		{
+			TargetNodeId = (*ConnSpec)->GetStringField(TEXT("to_node"));
+		}
+
+		FString SourcePin = (*ConnSpec)->GetStringField(TEXT("from_pin"));
+		FString TargetPin = (*ConnSpec)->GetStringField(TEXT("to_pin"));
+
+		if (!SourceNodeId.IsEmpty() && !TargetNodeId.IsEmpty())
+		{
+			FString ConnectError;
+			FBlueprintUtils::ConnectPins(Graph, SourceNodeId, SourcePin, TargetNodeId, TargetPin, ConnectError);
+		}
 	}
-
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
-	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Nodes created but compilation failed: %s"), *CompileError));
-	}
-
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
-	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
-	ResultData->SetStringField(TEXT("graph_name"), Graph->GetName());
-	ResultData->SetArrayField(TEXT("nodes"), CreatedNodes);
-	ResultData->SetNumberField(TEXT("node_count"), CreatedNodeIds.Num());
-
-	return FMCPToolResult::Success(
-		FString::Printf(TEXT("Created %d nodes"), CreatedNodeIds.Num()),
-		ResultData
-	);
 }
 
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteDeleteNode(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString NodeId;
 	if (!ExtractRequiredString(Params, TEXT("node_id"), NodeId, Error))
 	{
@@ -805,31 +676,16 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDeleteNode(const TSharedRef<FJso
 	FString GraphName = ExtractOptionalString(Params, TEXT("graph_name"), TEXT(""));
 	bool bFunctionGraph = ExtractOptionalBool(Params, TEXT("is_function_graph"), false);
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
@@ -842,22 +698,15 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDeleteNode(const TSharedRef<FJso
 		return FMCPToolResult::Error(DeleteError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Node deleted")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Node deleted but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("node_id"), NodeId);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Deleted node '%s'"), *NodeId),
@@ -870,13 +719,7 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDeleteNode(const TSharedRef<FJso
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteConnectPins(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString SourceNodeId;
 	if (!ExtractRequiredString(Params, TEXT("source_node_id"), SourceNodeId, Error))
 	{
@@ -894,31 +737,16 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteConnectPins(const TSharedRef<FJs
 	FString GraphName = ExtractOptionalString(Params, TEXT("graph_name"), TEXT(""));
 	bool bFunctionGraph = ExtractOptionalBool(Params, TEXT("is_function_graph"), false);
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
@@ -931,25 +759,18 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteConnectPins(const TSharedRef<FJs
 		return FMCPToolResult::Error(ConnectError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Pins connected")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Pins connected but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("source_node_id"), SourceNodeId);
 	ResultData->SetStringField(TEXT("source_pin"), SourcePin.IsEmpty() ? TEXT("(auto exec)") : SourcePin);
 	ResultData->SetStringField(TEXT("target_node_id"), TargetNodeId);
 	ResultData->SetStringField(TEXT("target_pin"), TargetPin.IsEmpty() ? TEXT("(auto exec)") : TargetPin);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Connected '%s' -> '%s'"), *SourceNodeId, *TargetNodeId),
@@ -960,13 +781,7 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteConnectPins(const TSharedRef<FJs
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteDisconnectPins(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString SourceNodeId;
 	if (!ExtractRequiredString(Params, TEXT("source_node_id"), SourceNodeId, Error))
 	{
@@ -994,31 +809,16 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDisconnectPins(const TSharedRef<
 	FString GraphName = ExtractOptionalString(Params, TEXT("graph_name"), TEXT(""));
 	bool bFunctionGraph = ExtractOptionalBool(Params, TEXT("is_function_graph"), false);
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
@@ -1031,25 +831,18 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDisconnectPins(const TSharedRef<
 		return FMCPToolResult::Error(DisconnectError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Pins disconnected")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Pins disconnected but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("source_node_id"), SourceNodeId);
 	ResultData->SetStringField(TEXT("source_pin"), SourcePin);
 	ResultData->SetStringField(TEXT("target_node_id"), TargetNodeId);
 	ResultData->SetStringField(TEXT("target_pin"), TargetPin);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Disconnected '%s.%s' from '%s.%s'"), *SourceNodeId, *SourcePin, *TargetNodeId, *TargetPin),
@@ -1060,13 +853,7 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteDisconnectPins(const TSharedRef<
 FMCPToolResult FMCPTool_BlueprintModify::ExecuteSetPinValue(const TSharedRef<FJsonObject>& Params)
 {
 	// Extract parameters
-	FString BlueprintPath;
 	TOptional<FMCPToolResult> Error;
-	if (!ExtractRequiredString(Params, TEXT("blueprint_path"), BlueprintPath, Error))
-	{
-		return Error.GetValue();
-	}
-
 	FString NodeId;
 	if (!ExtractRequiredString(Params, TEXT("node_id"), NodeId, Error))
 	{
@@ -1088,31 +875,16 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteSetPinValue(const TSharedRef<FJs
 	FString GraphName = ExtractOptionalString(Params, TEXT("graph_name"), TEXT(""));
 	bool bFunctionGraph = ExtractOptionalBool(Params, TEXT("is_function_graph"), false);
 
-	// Validate path
-	FString ValidationError;
-	if (!FMCPParamValidator::ValidateBlueprintPath(BlueprintPath, ValidationError))
+	// Load and validate Blueprint
+	FMCPBlueprintLoadContext Context;
+	if (auto LoadError = Context.LoadAndValidate(Params))
 	{
-		return FMCPToolResult::Error(ValidationError);
-	}
-
-	// Load Blueprint
-	FString LoadError;
-	UBlueprint* Blueprint = FBlueprintUtils::LoadBlueprint(BlueprintPath, LoadError);
-	if (!Blueprint)
-	{
-		return FMCPToolResult::Error(LoadError);
-	}
-
-	// Check if Blueprint is editable
-	FString EditError;
-	if (!FBlueprintUtils::IsBlueprintEditable(Blueprint, EditError))
-	{
-		return FMCPToolResult::Error(EditError);
+		return LoadError.GetValue();
 	}
 
 	// Find graph
 	FString GraphError;
-	UEdGraph* Graph = FBlueprintUtils::FindGraph(Blueprint, GraphName, bFunctionGraph, GraphError);
+	UEdGraph* Graph = FBlueprintUtils::FindGraph(Context.Blueprint, GraphName, bFunctionGraph, GraphError);
 	if (!Graph)
 	{
 		return FMCPToolResult::Error(GraphError);
@@ -1125,24 +897,17 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteSetPinValue(const TSharedRef<FJs
 		return FMCPToolResult::Error(SetError);
 	}
 
-	// Compile the Blueprint
-	FString CompileError;
-	if (!FBlueprintUtils::CompileBlueprint(Blueprint, CompileError))
+	// Compile and finalize
+	if (auto CompileError = Context.CompileAndFinalize(TEXT("Pin value set")))
 	{
-		return FMCPToolResult::Error(FString::Printf(
-			TEXT("Pin value set but compilation failed: %s"), *CompileError));
+		return CompileError.GetValue();
 	}
 
-	// Mark dirty
-	FBlueprintUtils::MarkBlueprintDirty(Blueprint);
-
 	// Build result
-	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-	ResultData->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	TSharedPtr<FJsonObject> ResultData = Context.BuildResultJson();
 	ResultData->SetStringField(TEXT("node_id"), NodeId);
 	ResultData->SetStringField(TEXT("pin_name"), PinName);
 	ResultData->SetStringField(TEXT("pin_value"), PinValue);
-	ResultData->SetBoolField(TEXT("compiled"), true);
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Set '%s.%s' = '%s'"), *NodeId, *PinName, *PinValue),

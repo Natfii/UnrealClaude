@@ -18,6 +18,7 @@
 #include "Tools/MCPTool_CaptureViewport.h"
 #include "Tools/MCPTool_BlueprintQuery.h"
 #include "Tools/MCPTool_BlueprintModify.h"
+#include "Tools/MCPTool_AnimBlueprintModify.h"
 
 FMCPToolRegistry::FMCPToolRegistry()
 {
@@ -53,6 +54,7 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 	// Blueprint tools
 	RegisterTool(MakeShared<FMCPTool_BlueprintQuery>());
 	RegisterTool(MakeShared<FMCPTool_BlueprintModify>());
+	RegisterTool(MakeShared<FMCPTool_AnimBlueprintModify>());
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Registered %d MCP tools"), Tools.Num());
 }

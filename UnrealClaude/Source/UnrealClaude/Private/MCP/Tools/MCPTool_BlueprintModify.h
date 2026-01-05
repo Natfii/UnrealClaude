@@ -127,4 +127,19 @@ private:
 
 	// Helpers
 	EBlueprintType ParseBlueprintType(const FString& TypeString);
+
+	// ExecuteAddNodes helper functions (reduces function complexity)
+	bool CreateNodesFromSpec(
+		UEdGraph* Graph,
+		const TArray<TSharedPtr<FJsonValue>>& NodesArray,
+		TArray<FString>& OutCreatedNodeIds,
+		TArray<TSharedPtr<FJsonValue>>& OutCreatedNodes,
+		FString& OutError
+	);
+
+	void ProcessNodeConnections(
+		UEdGraph* Graph,
+		const TArray<TSharedPtr<FJsonValue>>& ConnectionsArray,
+		const TArray<FString>& CreatedNodeIds
+	);
 };
