@@ -3,6 +3,7 @@
 #include "AnimGraphEditor.h"
 #include "AnimStateMachineEditor.h"
 #include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_Root.h"
 #include "AnimStateNode.h"
 #include "AnimStateNodeBase.h"
 #include "AnimStateTransitionNode.h"
@@ -123,11 +124,18 @@ UEdGraphNode* FAnimGraphEditor::CreateTransitionConditionNode(
 	}
 	else if (NormalizedType == TEXT("comparefloat") || NormalizedType == TEXT("compare_float"))
 	{
-		Node = CreateComparisonNode(TransitionGraph, TEXT("Float"), Params, Position, OutError);
+		// CompareFloat requires a comparison operator from params
+		FString ComparisonOp = TEXT("Less"); // Default
+		if (Params.IsValid() && Params->HasField(TEXT("comparison")))
+		{
+			ComparisonOp = Params->GetStringField(TEXT("comparison"));
+		}
+		Node = CreateComparisonNode(TransitionGraph, ComparisonOp, Params, Position, OutError);
 	}
 	else if (NormalizedType == TEXT("comparebool") || NormalizedType == TEXT("compare_bool"))
 	{
-		Node = CreateComparisonNode(TransitionGraph, TEXT("Bool"), Params, Position, OutError);
+		// CompareBool uses Equal comparison for booleans
+		Node = CreateComparisonNode(TransitionGraph, TEXT("Equal"), Params, Position, OutError);
 	}
 	else if (NormalizedType == TEXT("and"))
 	{
@@ -141,9 +149,33 @@ UEdGraphNode* FAnimGraphEditor::CreateTransitionConditionNode(
 	{
 		Node = CreateLogicNode(TransitionGraph, TEXT("Not"), Position, OutError);
 	}
+	else if (NormalizedType == TEXT("greater"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("Greater"), Params, Position, OutError);
+	}
+	else if (NormalizedType == TEXT("less"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("Less"), Params, Position, OutError);
+	}
+	else if (NormalizedType == TEXT("greaterequal") || NormalizedType == TEXT("greater_equal"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("GreaterEqual"), Params, Position, OutError);
+	}
+	else if (NormalizedType == TEXT("lessequal") || NormalizedType == TEXT("less_equal"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("LessEqual"), Params, Position, OutError);
+	}
+	else if (NormalizedType == TEXT("equal"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("Equal"), Params, Position, OutError);
+	}
+	else if (NormalizedType == TEXT("notequal") || NormalizedType == TEXT("not_equal"))
+	{
+		Node = CreateComparisonNode(TransitionGraph, TEXT("NotEqual"), Params, Position, OutError);
+	}
 	else
 	{
-		OutError = FString::Printf(TEXT("Unknown condition node type: %s. Supported: TimeRemaining, CompareFloat, CompareBool, And, Or, Not"), *NodeType);
+		OutError = FString::Printf(TEXT("Unknown condition node type: %s. Supported: TimeRemaining, CompareFloat, CompareBool, Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual, And, Or, Not"), *NodeType);
 		return nullptr;
 	}
 
@@ -683,8 +715,10 @@ UEdGraphNode* FAnimGraphEditor::FindResultNode(UEdGraph* Graph)
 
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
+		// Check for all types of result/root nodes
 		if (Node->IsA<UAnimGraphNode_StateResult>() ||
-			Node->IsA<UAnimGraphNode_TransitionResult>())
+			Node->IsA<UAnimGraphNode_TransitionResult>() ||
+			Node->IsA<UAnimGraphNode_Root>())
 		{
 			return Node;
 		}
@@ -1028,4 +1062,152 @@ UEdGraphNode* FAnimGraphEditor::CreateVariableGetNode(UEdGraph* Graph, UAnimBlue
 	NodeCreator.Finalize();
 
 	return VarNode;
+}
+
+// ===== AnimGraph Root Connection =====
+
+UAnimGraphNode_Root* FAnimGraphEditor::FindAnimGraphRoot(UAnimBlueprint* AnimBP, FString& OutError)
+{
+	if (!AnimBP)
+	{
+		OutError = TEXT("Invalid Animation Blueprint");
+		return nullptr;
+	}
+
+	// Find the main AnimGraph
+	UEdGraph* AnimGraph = FindAnimGraph(AnimBP, OutError);
+	if (!AnimGraph)
+	{
+		return nullptr;
+	}
+
+	// Find the root node in the AnimGraph
+	for (UEdGraphNode* Node : AnimGraph->Nodes)
+	{
+		if (UAnimGraphNode_Root* RootNode = Cast<UAnimGraphNode_Root>(Node))
+		{
+			return RootNode;
+		}
+	}
+
+	OutError = TEXT("AnimGraph root node (Output Pose) not found");
+	return nullptr;
+}
+
+bool FAnimGraphEditor::ConnectStateMachineToAnimGraphRoot(
+	UAnimBlueprint* AnimBP,
+	const FString& StateMachineName,
+	FString& OutError)
+{
+	if (!AnimBP)
+	{
+		OutError = TEXT("Invalid Animation Blueprint");
+		return false;
+	}
+
+	// Find the AnimGraph
+	UEdGraph* AnimGraph = FindAnimGraph(AnimBP, OutError);
+	if (!AnimGraph)
+	{
+		return false;
+	}
+
+	// Find the State Machine node in the AnimGraph
+	UAnimGraphNode_StateMachine* StateMachineNode = FAnimStateMachineEditor::FindStateMachine(AnimBP, StateMachineName, OutError);
+	if (!StateMachineNode)
+	{
+		return false;
+	}
+
+	// Find the AnimGraph root node
+	UAnimGraphNode_Root* RootNode = FindAnimGraphRoot(AnimBP, OutError);
+	if (!RootNode)
+	{
+		return false;
+	}
+
+	// Find the State Machine's output pose pin - try multiple common names
+	UEdGraphPin* SMOutputPin = FindPinByName(StateMachineNode, TEXT("Pose"), EGPD_Output);
+	if (!SMOutputPin)
+	{
+		SMOutputPin = FindPinByName(StateMachineNode, TEXT("Output"), EGPD_Output);
+	}
+	if (!SMOutputPin)
+	{
+		SMOutputPin = FindPinByName(StateMachineNode, TEXT("Output Pose"), EGPD_Output);
+	}
+	// Fallback: find any output pin
+	if (!SMOutputPin)
+	{
+		for (UEdGraphPin* Pin : StateMachineNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				SMOutputPin = Pin;
+				break;
+			}
+		}
+	}
+
+	if (!SMOutputPin)
+	{
+		// Debug: list available pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : StateMachineNode->Pins)
+		{
+			AvailablePins += FString::Printf(TEXT("[%s:%s] "),
+				*Pin->PinName.ToString(),
+				Pin->Direction == EGPD_Input ? TEXT("In") : TEXT("Out"));
+		}
+		OutError = FString::Printf(TEXT("State Machine '%s' has no output pose pin. Available pins: %s"),
+			*StateMachineName, AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
+		return false;
+	}
+
+	// Find the AnimGraph root's input pin - try multiple common names
+	UEdGraphPin* RootInputPin = FindPinByName(RootNode, TEXT("Result"), EGPD_Input);
+	if (!RootInputPin)
+	{
+		RootInputPin = FindPinByName(RootNode, TEXT("Pose"), EGPD_Input);
+	}
+	if (!RootInputPin)
+	{
+		RootInputPin = FindPinByName(RootNode, TEXT("InPose"), EGPD_Input);
+	}
+	// Fallback: find any input pin
+	if (!RootInputPin)
+	{
+		for (UEdGraphPin* Pin : RootNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				RootInputPin = Pin;
+				break;
+			}
+		}
+	}
+
+	if (!RootInputPin)
+	{
+		// Debug: list available pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : RootNode->Pins)
+		{
+			AvailablePins += FString::Printf(TEXT("[%s:%s] "),
+				*Pin->PinName.ToString(),
+				Pin->Direction == EGPD_Input ? TEXT("In") : TEXT("Out"));
+		}
+		OutError = FString::Printf(TEXT("AnimGraph root node has no input pose pin. Available pins: %s"),
+			AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
+		return false;
+	}
+
+	// Break any existing connections on the root input
+	RootInputPin->BreakAllPinLinks();
+
+	// Make the connection
+	SMOutputPin->MakeLinkTo(RootInputPin);
+	AnimGraph->Modify();
+
+	return true;
 }

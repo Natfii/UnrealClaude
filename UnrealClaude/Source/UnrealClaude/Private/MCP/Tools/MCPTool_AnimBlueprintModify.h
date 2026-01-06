@@ -21,6 +21,7 @@
  * - create_state_machine: Create new state machine
  * - add_state: Add state to state machine
  * - remove_state: Remove state from state machine
+ * - set_entry_state: Set entry state for state machine
  * - add_transition: Create transition between states
  * - remove_transition: Remove transition
  * - set_transition_duration: Set blend duration
@@ -28,7 +29,8 @@
  * - add_condition_node: Add node to transition graph (fully supported)
  * - delete_condition_node: Remove node from transition graph
  * - connect_condition_nodes: Connect nodes in transition graph
- * - connect_to_result: Connect condition to transition result
+ * - connect_to_result: Connect condition to transition result (for transitions)
+ * - connect_state_machine_to_output: Connect State Machine to AnimGraph Output Pose
  * - set_state_animation: Assign animation to state
  * - find_animations: Search for compatible animation assets
  * - batch: Execute multiple operations atomically
@@ -60,6 +62,7 @@ public:
 			"- 'get_state_machine': Detailed state machine info\n"
 			"- 'create_state_machine': Create new state machine\n"
 			"- 'add_state', 'remove_state': Manage states\n"
+			"- 'set_entry_state': Set entry state for state machine\n"
 			"- 'add_transition', 'remove_transition': Manage transitions\n\n"
 			"Transition Configuration:\n"
 			"- 'set_transition_duration': Set blend duration\n"
@@ -67,6 +70,8 @@ public:
 			"Condition Graph (transition logic):\n"
 			"- 'add_condition_node': Add logic node (TimeRemaining, Greater, Less, And, Or, Not, GetVariable)\n"
 			"- 'delete_condition_node', 'connect_condition_nodes', 'connect_to_result'\n\n"
+			"AnimGraph Connection:\n"
+			"- 'connect_state_machine_to_output': Connect State Machine to AnimGraph Output Pose\n\n"
 			"Animation Assignment:\n"
 			"- 'set_state_animation': Assign AnimSequence, BlendSpace, BlendSpace1D, or Montage\n"
 			"- 'find_animations': Search compatible animation assets\n\n"
@@ -74,7 +79,7 @@ public:
 		);
 		Info.Parameters = {
 			FMCPToolParameter(TEXT("blueprint_path"), TEXT("string"), TEXT("Path to the Animation Blueprint (e.g., '/Game/Characters/ABP_Character')"), true),
-			FMCPToolParameter(TEXT("operation"), TEXT("string"), TEXT("Operation: get_info, get_state_machine, create_state_machine, add_state, remove_state, add_transition, remove_transition, set_transition_duration, set_transition_priority, add_condition_node, delete_condition_node, connect_condition_nodes, connect_to_result, set_state_animation, find_animations, batch"), true),
+			FMCPToolParameter(TEXT("operation"), TEXT("string"), TEXT("Operation: get_info, get_state_machine, create_state_machine, add_state, remove_state, set_entry_state, add_transition, remove_transition, set_transition_duration, set_transition_priority, add_condition_node, delete_condition_node, connect_condition_nodes, connect_to_result, connect_state_machine_to_output, set_state_animation, find_animations, batch"), true),
 			FMCPToolParameter(TEXT("state_machine"), TEXT("string"), TEXT("State machine name (for state/transition operations)"), false),
 			FMCPToolParameter(TEXT("state_name"), TEXT("string"), TEXT("State name (for state operations)"), false),
 			FMCPToolParameter(TEXT("from_state"), TEXT("string"), TEXT("Source state name (for transitions)"), false),
@@ -110,6 +115,7 @@ private:
 	FMCPToolResult HandleCreateStateMachine(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleAddState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleRemoveState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleSetEntryState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleAddTransition(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleRemoveTransition(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleSetTransitionDuration(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
@@ -118,6 +124,7 @@ private:
 	FMCPToolResult HandleDeleteConditionNode(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleConnectConditionNodes(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleConnectToResult(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult HandleConnectStateMachineToOutput(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleSetStateAnimation(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleFindAnimations(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleBatch(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);

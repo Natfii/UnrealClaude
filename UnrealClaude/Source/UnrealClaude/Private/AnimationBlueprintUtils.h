@@ -143,6 +143,21 @@ public:
 		FString& OutError
 	);
 
+	/**
+	 * Set the entry state for a state machine
+	 * @param AnimBP - Animation Blueprint
+	 * @param StateMachineName - State machine name
+	 * @param StateName - Name of the state to set as entry
+	 * @param OutError - Error message if failed
+	 * @return True if successful
+	 */
+	static bool SetEntryState(
+		UAnimBlueprint* AnimBP,
+		const FString& StateMachineName,
+		const FString& StateName,
+		FString& OutError
+	);
+
 	// ===== Transition Operations (Level 3) =====
 
 	/**

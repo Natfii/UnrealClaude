@@ -2,6 +2,7 @@
 
 #include "MCPTool_AnimBlueprintModify.h"
 #include "AnimationBlueprintUtils.h"
+#include "AnimGraphEditor.h"
 #include "Serialization/JsonSerializer.h"
 
 FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObject>& Params)
@@ -47,6 +48,10 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObjec
 	{
 		return HandleRemoveState(BlueprintPath, Params);
 	}
+	else if (Operation == TEXT("set_entry_state"))
+	{
+		return HandleSetEntryState(BlueprintPath, Params);
+	}
 	else if (Operation == TEXT("add_transition"))
 	{
 		return HandleAddTransition(BlueprintPath, Params);
@@ -78,6 +83,10 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObjec
 	else if (Operation == TEXT("connect_to_result"))
 	{
 		return HandleConnectToResult(BlueprintPath, Params);
+	}
+	else if (Operation == TEXT("connect_state_machine_to_output"))
+	{
+		return HandleConnectStateMachineToOutput(BlueprintPath, Params);
 	}
 	else if (Operation == TEXT("set_state_animation"))
 	{
@@ -254,6 +263,43 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::HandleRemoveState(const FString& Bl
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("message"), FString::Printf(TEXT("Removed state '%s' from '%s'"), *StateName, *StateMachineName));
+
+	return FMCPToolResult::Success(TEXT("Operation completed"), Result);
+}
+
+FMCPToolResult FMCPTool_AnimBlueprintModify::HandleSetEntryState(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params)
+{
+	FString Error;
+	UAnimBlueprint* AnimBP = FAnimationBlueprintUtils::LoadAnimBlueprint(BlueprintPath, Error);
+	if (!AnimBP)
+	{
+		return FMCPToolResult::Error(Error);
+	}
+
+	FString StateMachineName = ExtractOptionalString(Params, TEXT("state_machine"));
+	FString StateName = ExtractOptionalString(Params, TEXT("state_name"));
+
+	if (StateMachineName.IsEmpty())
+	{
+		return FMCPToolResult::Error(TEXT("state_machine parameter required"));
+	}
+	if (StateName.IsEmpty())
+	{
+		return FMCPToolResult::Error(TEXT("state_name parameter required"));
+	}
+
+	if (!FAnimationBlueprintUtils::SetEntryState(AnimBP, StateMachineName, StateName, Error))
+	{
+		return FMCPToolResult::Error(Error);
+	}
+
+	FAnimationBlueprintUtils::CompileAnimBlueprint(AnimBP, Error);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("state_machine"), StateMachineName);
+	Result->SetStringField(TEXT("entry_state"), StateName);
+	Result->SetStringField(TEXT("message"), FString::Printf(TEXT("Set '%s' as entry state for '%s'"), *StateName, *StateMachineName));
 
 	return FMCPToolResult::Success(TEXT("Operation completed"), Result);
 }
@@ -553,6 +599,36 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::HandleConnectToResult(const FString
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("message"), TEXT("Connected condition to transition result"));
+
+	return FMCPToolResult::Success(TEXT("Operation completed"), Result);
+}
+
+FMCPToolResult FMCPTool_AnimBlueprintModify::HandleConnectStateMachineToOutput(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params)
+{
+	FString Error;
+	UAnimBlueprint* AnimBP = FAnimationBlueprintUtils::LoadAnimBlueprint(BlueprintPath, Error);
+	if (!AnimBP)
+	{
+		return FMCPToolResult::Error(Error);
+	}
+
+	FString StateMachineName = ExtractOptionalString(Params, TEXT("state_machine"));
+	if (StateMachineName.IsEmpty())
+	{
+		return FMCPToolResult::Error(TEXT("state_machine parameter required"));
+	}
+
+	if (!FAnimGraphEditor::ConnectStateMachineToAnimGraphRoot(AnimBP, StateMachineName, Error))
+	{
+		return FMCPToolResult::Error(Error);
+	}
+
+	FAnimationBlueprintUtils::CompileAnimBlueprint(AnimBP, Error);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("state_machine"), StateMachineName);
+	Result->SetStringField(TEXT("message"), FString::Printf(TEXT("Connected State Machine '%s' to AnimGraph Output Pose"), *StateMachineName));
 
 	return FMCPToolResult::Success(TEXT("Operation completed"), Result);
 }

@@ -8,6 +8,7 @@
 
 // Forward declarations
 class UAnimGraphNode_StateMachine;
+class UAnimGraphNode_Root;
 class UAnimStateNode;
 class UAnimStateTransitionNode;
 class UEdGraph;
@@ -28,8 +29,9 @@ class UAnimMontage;
  *
  * Supported Condition Node Types:
  * - TimeRemaining: Check time remaining in current state
- * - CompareFloat: Compare float variable (Speed, Direction, etc.)
- * - CompareBool: Compare boolean variable (IsJumping, IsFalling, etc.)
+ * - CompareFloat: Float comparison (requires "comparison" param: Greater, Less, etc.)
+ * - CompareBool: Boolean equality comparison
+ * - Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual: Direct comparison operators
  * - And, Or, Not: Logical operators
  */
 class UNREALCLAUDE_API FAnimGraphEditor
@@ -163,6 +165,28 @@ public:
 	 * Clear all nodes from state graph (except result)
 	 */
 	static bool ClearStateGraph(UEdGraph* StateGraph, FString& OutError);
+
+	// ===== AnimGraph Root Connection (Level 5) =====
+
+	/**
+	 * Connect a State Machine node's output to the AnimGraph's root result
+	 * This is used to wire the State Machine into the animation output
+	 *
+	 * @param AnimBP - The Animation Blueprint
+	 * @param StateMachineName - Name of the State Machine node to connect
+	 * @param OutError - Error message if failed
+	 * @return True if connection succeeded
+	 */
+	static bool ConnectStateMachineToAnimGraphRoot(
+		UAnimBlueprint* AnimBP,
+		const FString& StateMachineName,
+		FString& OutError
+	);
+
+	/**
+	 * Find the AnimGraph root node (Output Pose)
+	 */
+	static UAnimGraphNode_Root* FindAnimGraphRoot(UAnimBlueprint* AnimBP, FString& OutError);
 
 	// ===== Node Finding =====
 

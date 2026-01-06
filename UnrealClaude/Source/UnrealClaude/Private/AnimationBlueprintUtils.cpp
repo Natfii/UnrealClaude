@@ -239,6 +239,21 @@ TArray<UAnimStateNode*> FAnimationBlueprintUtils::GetAllStates(
 	return FAnimStateMachineEditor::GetAllStates(AnimBP, StateMachineName, OutError);
 }
 
+bool FAnimationBlueprintUtils::SetEntryState(
+	UAnimBlueprint* AnimBP,
+	const FString& StateMachineName,
+	const FString& StateName,
+	FString& OutError)
+{
+	if (!AnimBP)
+	{
+		OutError = TEXT("AnimBlueprint is null");
+		return false;
+	}
+
+	return FAnimStateMachineEditor::SetEntryState(AnimBP, StateMachineName, StateName, OutError);
+}
+
 // ===== Transition Operations (Level 3) =====
 
 UAnimStateTransitionNode* FAnimationBlueprintUtils::CreateTransition(

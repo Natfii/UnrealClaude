@@ -190,6 +190,41 @@ public:
 	static TArray<FString> GetStateNames(UAnimGraphNode_StateMachine* StateMachine);
 
 	/**
+	 * Set the entry state for a state machine (by AnimBP and names)
+	 * @param AnimBP - Animation Blueprint
+	 * @param StateMachineName - State machine name
+	 * @param StateName - Name of the state to set as entry
+	 * @param OutError - Error message if failed
+	 * @return True if successful
+	 */
+	static bool SetEntryState(
+		UAnimBlueprint* AnimBP,
+		const FString& StateMachineName,
+		const FString& StateName,
+		FString& OutError
+	);
+
+	/**
+	 * Set the entry state for a state machine (by node)
+	 * @param StateMachine - State machine node
+	 * @param StateName - Name of the state to set as entry
+	 * @param OutError - Error message if failed
+	 * @return True if successful
+	 */
+	static bool SetEntryState(
+		UAnimGraphNode_StateMachine* StateMachine,
+		const FString& StateName,
+		FString& OutError
+	);
+
+	/**
+	 * Get the current entry state name for a state machine
+	 * @param StateMachine - State machine node
+	 * @return Name of entry state, or empty string if not set
+	 */
+	static FString GetEntryStateName(UAnimGraphNode_StateMachine* StateMachine);
+
+	/**
 	 * Get the bound graph for a state (where animations are placed)
 	 */
 	static UEdGraph* GetStateBoundGraph(

@@ -5,6 +5,7 @@
 #include "AnimGraphNode_StateResult.h"
 #include "AnimGraphNode_TransitionResult.h"
 #include "AnimStateNode.h"
+#include "AnimStateEntryNode.h"
 #include "AnimStateTransitionNode.h"
 #include "AnimationStateMachineGraph.h"
 #include "AnimationStateMachineSchema.h"
@@ -270,9 +271,15 @@ UAnimStateNode* FAnimStateMachineEditor::AddState(
 
 	UAnimStateNode* State = AddState(SM, StateName, Position, OutNodeId, OutError);
 
-	// TODO: If bIsEntryState, connect to entry node
-	// Entry state handling would need additional implementation
-	(void)bIsEntryState;
+	// If bIsEntryState, set this state as the entry state
+	if (State && bIsEntryState)
+	{
+		FString EntryError;
+		if (!SetEntryState(SM, StateName, EntryError))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("State '%s' created but failed to set as entry: %s"), *StateName, *EntryError);
+		}
+	}
 
 	return State;
 }
@@ -518,6 +525,157 @@ TArray<FString> FAnimStateMachineEditor::GetStateNames(UAnimGraphNode_StateMachi
 	}
 
 	return Names;
+}
+
+bool FAnimStateMachineEditor::SetEntryState(
+	UAnimBlueprint* AnimBP,
+	const FString& StateMachineName,
+	const FString& StateName,
+	FString& OutError)
+{
+	UAnimGraphNode_StateMachine* SM = FindStateMachine(AnimBP, StateMachineName, OutError);
+	if (!SM) return false;
+
+	return SetEntryState(SM, StateName, OutError);
+}
+
+bool FAnimStateMachineEditor::SetEntryState(
+	UAnimGraphNode_StateMachine* StateMachine,
+	const FString& StateName,
+	FString& OutError)
+{
+	if (!StateMachine)
+	{
+		OutError = TEXT("Invalid state machine");
+		return false;
+	}
+
+	UAnimationStateMachineGraph* SMGraph = GetStateMachineGraph(StateMachine, OutError);
+	if (!SMGraph)
+	{
+		return false;
+	}
+
+	// Find the entry node
+	UAnimStateEntryNode* EntryNode = SMGraph->EntryNode;
+	if (!EntryNode)
+	{
+		// Try to find entry node in graph nodes
+		for (UEdGraphNode* Node : SMGraph->Nodes)
+		{
+			if (UAnimStateEntryNode* FoundEntry = Cast<UAnimStateEntryNode>(Node))
+			{
+				EntryNode = FoundEntry;
+				break;
+			}
+		}
+	}
+
+	if (!EntryNode)
+	{
+		OutError = TEXT("State machine has no entry node");
+		return false;
+	}
+
+	// Find the target state
+	UAnimStateNode* TargetState = FindStateNodeInGraph(SMGraph, StateName);
+	if (!TargetState)
+	{
+		OutError = FString::Printf(TEXT("State '%s' not found in state machine"), *StateName);
+		return false;
+	}
+
+	// Find the entry node's output pin
+	UEdGraphPin* EntryOutputPin = nullptr;
+	for (UEdGraphPin* Pin : EntryNode->Pins)
+	{
+		if (Pin->Direction == EGPD_Output)
+		{
+			EntryOutputPin = Pin;
+			break;
+		}
+	}
+
+	if (!EntryOutputPin)
+	{
+		OutError = TEXT("Entry node has no output pin");
+		return false;
+	}
+
+	// Find the target state's input pin
+	UEdGraphPin* StateInputPin = nullptr;
+	for (UEdGraphPin* Pin : TargetState->Pins)
+	{
+		if (Pin->Direction == EGPD_Input)
+		{
+			StateInputPin = Pin;
+			break;
+		}
+	}
+
+	if (!StateInputPin)
+	{
+		OutError = FString::Printf(TEXT("State '%s' has no input pin"), *StateName);
+		return false;
+	}
+
+	// Break existing entry connections
+	EntryOutputPin->BreakAllPinLinks();
+
+	// Connect entry to the new target state
+	EntryOutputPin->MakeLinkTo(StateInputPin);
+	SMGraph->Modify();
+
+	return true;
+}
+
+FString FAnimStateMachineEditor::GetEntryStateName(UAnimGraphNode_StateMachine* StateMachine)
+{
+	if (!StateMachine)
+	{
+		return FString();
+	}
+
+	FString Error;
+	UAnimationStateMachineGraph* SMGraph = GetStateMachineGraph(StateMachine, Error);
+	if (!SMGraph)
+	{
+		return FString();
+	}
+
+	// Find the entry node
+	UAnimStateEntryNode* EntryNode = SMGraph->EntryNode;
+	if (!EntryNode)
+	{
+		for (UEdGraphNode* Node : SMGraph->Nodes)
+		{
+			if (UAnimStateEntryNode* FoundEntry = Cast<UAnimStateEntryNode>(Node))
+			{
+				EntryNode = FoundEntry;
+				break;
+			}
+		}
+	}
+
+	if (!EntryNode)
+	{
+		return FString();
+	}
+
+	// Find what state the entry is connected to
+	for (UEdGraphPin* Pin : EntryNode->Pins)
+	{
+		if (Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
+		{
+			UEdGraphPin* LinkedPin = Pin->LinkedTo[0];
+			if (UAnimStateNode* StateNode = Cast<UAnimStateNode>(LinkedPin->GetOwningNode()))
+			{
+				return StateNode->GetStateName();
+			}
+		}
+	}
+
+	return FString();
 }
 
 UEdGraph* FAnimStateMachineEditor::GetStateBoundGraph(
