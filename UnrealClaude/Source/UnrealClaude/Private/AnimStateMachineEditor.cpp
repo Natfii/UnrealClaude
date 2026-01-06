@@ -2,6 +2,8 @@
 
 #include "AnimStateMachineEditor.h"
 #include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_StateResult.h"
+#include "AnimGraphNode_TransitionResult.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
 #include "AnimationStateMachineGraph.h"
@@ -9,6 +11,7 @@
 #include "AnimationTransitionGraph.h"
 #include "AnimationTransitionSchema.h"
 #include "AnimationStateGraph.h"
+#include "AnimationStateGraphSchema.h"
 #include "AnimationGraph.h"
 #include "AnimationGraphSchema.h"
 #include "EdGraph/EdGraph.h"
@@ -317,13 +320,49 @@ UAnimStateNode* FAnimStateMachineEditor::AddState(
 	// The engine asserts that BoundGraph == 0 during node initialization
 	NodeCreator.Finalize();
 
-	// Now create the bound graph (state's internal animation graph)
-	StateNode->BoundGraph = FBlueprintEditorUtils::CreateNewGraph(
-		StateNode,
-		FName(*StateName),
-		UAnimationStateGraph::StaticClass(),
-		UAnimationGraphSchema::StaticClass()
+	// Create the bound graph (state's internal animation graph)
+	// Use UAnimationStateGraphSchema which properly initializes state graphs
+	UAnimationStateGraph* StateGraph = CastChecked<UAnimationStateGraph>(
+		FBlueprintEditorUtils::CreateNewGraph(
+			StateNode,
+			FName(*StateName),
+			UAnimationStateGraph::StaticClass(),
+			UAnimationStateGraphSchema::StaticClass()
+		)
 	);
+	StateNode->BoundGraph = StateGraph;
+
+	// CRITICAL: Create the result node (Output Animation Pose) in the state graph
+	// The schema's CreateDefaultNodesForGraph should handle this, but we ensure it exists
+	const UAnimationStateGraphSchema* Schema = CastChecked<UAnimationStateGraphSchema>(StateGraph->GetSchema());
+	if (Schema)
+	{
+		Schema->CreateDefaultNodesForGraph(*StateGraph);
+	}
+
+	// Verify the result node was created
+	bool bHasResultNode = false;
+	for (UEdGraphNode* Node : StateGraph->Nodes)
+	{
+		if (Node->IsA<UAnimGraphNode_StateResult>())
+		{
+			bHasResultNode = true;
+			break;
+		}
+	}
+
+	// If schema didn't create the result node, create it manually
+	if (!bHasResultNode)
+	{
+		FGraphNodeCreator<UAnimGraphNode_StateResult> ResultCreator(*StateGraph);
+		UAnimGraphNode_StateResult* ResultNode = ResultCreator.CreateNode();
+		if (ResultNode)
+		{
+			ResultNode->NodePosX = 200;
+			ResultNode->NodePosY = 0;
+			ResultCreator.Finalize();
+		}
+	}
 
 	// Generate and set node ID
 	OutNodeId = GenerateStateNodeId(StateName, SMGraph);
@@ -331,6 +370,7 @@ UAnimStateNode* FAnimStateMachineEditor::AddState(
 
 	// Mark dirty
 	SMGraph->Modify();
+	StateGraph->Modify();
 
 	return StateNode;
 }
@@ -568,18 +608,53 @@ UAnimStateTransitionNode* FAnimStateMachineEditor::CreateTransition(
 	ConnectStateNodes(SourceState, TargetState, TransitionNode);
 
 	// Create the transition rule graph
-	TransitionNode->BoundGraph = FBlueprintEditorUtils::CreateNewGraph(
-		TransitionNode,
-		NAME_None,
-		UAnimationTransitionGraph::StaticClass(),
-		UAnimationTransitionSchema::StaticClass()
+	UAnimationTransitionGraph* TransitionGraph = CastChecked<UAnimationTransitionGraph>(
+		FBlueprintEditorUtils::CreateNewGraph(
+			TransitionNode,
+			NAME_None,
+			UAnimationTransitionGraph::StaticClass(),
+			UAnimationTransitionSchema::StaticClass()
+		)
 	);
+	TransitionNode->BoundGraph = TransitionGraph;
+
+	// CRITICAL: Create the result node (bCanEnterTransition) in the transition graph
+	const UAnimationTransitionSchema* Schema = CastChecked<UAnimationTransitionSchema>(TransitionGraph->GetSchema());
+	if (Schema)
+	{
+		Schema->CreateDefaultNodesForGraph(*TransitionGraph);
+	}
+
+	// Verify the result node was created
+	bool bHasResultNode = false;
+	for (UEdGraphNode* Node : TransitionGraph->Nodes)
+	{
+		if (Node->IsA<UAnimGraphNode_TransitionResult>())
+		{
+			bHasResultNode = true;
+			break;
+		}
+	}
+
+	// If schema didn't create the result node, create it manually
+	if (!bHasResultNode)
+	{
+		FGraphNodeCreator<UAnimGraphNode_TransitionResult> ResultCreator(*TransitionGraph);
+		UAnimGraphNode_TransitionResult* ResultNode = ResultCreator.CreateNode();
+		if (ResultNode)
+		{
+			ResultNode->NodePosX = 200;
+			ResultNode->NodePosY = 0;
+			ResultCreator.Finalize();
+		}
+	}
 
 	// Generate and set node ID
 	OutNodeId = GenerateTransitionNodeId(FromState, ToState, SMGraph);
 	SetNodeId(TransitionNode, OutNodeId);
 
 	SMGraph->Modify();
+	TransitionGraph->Modify();
 
 	return TransitionNode;
 }

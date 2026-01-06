@@ -14,6 +14,12 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObjec
 		return Error.GetValue();
 	}
 
+	// Validate blueprint path for security (block engine paths, path traversal, etc.)
+	if (!ValidateBlueprintPathParam(BlueprintPath, Error))
+	{
+		return Error.GetValue();
+	}
+
 	FString Operation;
 	if (!ExtractRequiredString(Params, TEXT("operation"), Operation, Error))
 	{

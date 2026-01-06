@@ -21,6 +21,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphSchema_K2.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_TransitionRuleGetter.h"
@@ -186,18 +187,48 @@ bool FAnimGraphEditor::ConnectTransitionNodes(
 		return false;
 	}
 
-	// Find pins
+	// Find source pin with fallback
 	UEdGraphPin* SourcePin = FindPinByName(SourceNode, SourcePinName, EGPD_Output);
 	if (!SourcePin)
 	{
-		OutError = FString::Printf(TEXT("Source pin '%s' not found on node %s"), *SourcePinName, *SourceNodeId);
+		// Try common alternative names
+		SourcePin = FindPinByName(SourceNode, TEXT("ReturnValue"), EGPD_Output);
+	}
+	if (!SourcePin)
+	{
+		SourcePin = FindPinByName(SourceNode, TEXT("Result"), EGPD_Output);
+	}
+	if (!SourcePin)
+	{
+		// Debug: list available output pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : SourceNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Source pin '%s' not found on node %s. Available output pins: %s"),
+			*SourcePinName, *SourceNodeId, AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 
+	// Find target pin with fallback
 	UEdGraphPin* TargetPin = FindPinByName(TargetNode, TargetPinName, EGPD_Input);
 	if (!TargetPin)
 	{
-		OutError = FString::Printf(TEXT("Target pin '%s' not found on node %s"), *TargetPinName, *TargetNodeId);
+		// Debug: list available input pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : TargetNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Target pin '%s' not found on node %s. Available input pins: %s"),
+			*TargetPinName, *TargetNodeId, AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 
@@ -228,12 +259,43 @@ bool FAnimGraphEditor::ConnectToTransitionResult(
 		return false;
 	}
 
-	// Find condition output pin
+	// Find condition output pin - try common names
 	FString PinName = ConditionPinName.IsEmpty() ? TEXT("ReturnValue") : ConditionPinName;
 	UEdGraphPin* ConditionPin = FindPinByName(ConditionNode, PinName, EGPD_Output);
 	if (!ConditionPin)
 	{
-		OutError = FString::Printf(TEXT("Condition output pin '%s' not found"), *PinName);
+		ConditionPin = FindPinByName(ConditionNode, TEXT("Result"), EGPD_Output);
+	}
+	if (!ConditionPin)
+	{
+		ConditionPin = FindPinByName(ConditionNode, TEXT("Output"), EGPD_Output);
+	}
+	// Fallback: find any boolean output pin
+	if (!ConditionPin)
+	{
+		for (UEdGraphPin* Pin : ConditionNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output &&
+				Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
+			{
+				ConditionPin = Pin;
+				break;
+			}
+		}
+	}
+	if (!ConditionPin)
+	{
+		// Debug: list available output pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : ConditionNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Condition output pin '%s' not found. Available output pins: %s"),
+			*PinName, AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 
@@ -245,17 +307,55 @@ bool FAnimGraphEditor::ConnectToTransitionResult(
 		return false;
 	}
 
-	// Find bCanEnterTransition pin
+	// Find bCanEnterTransition pin - try multiple common names for UE 5.7
 	UEdGraphPin* ResultPin = FindPinByName(ResultNode, TEXT("bCanEnterTransition"), EGPD_Input);
 	if (!ResultPin)
 	{
-		// Try alternative names
 		ResultPin = FindPinByName(ResultNode, TEXT("CanEnterTransition"), EGPD_Input);
+	}
+	if (!ResultPin)
+	{
+		ResultPin = FindPinByName(ResultNode, TEXT("Result"), EGPD_Input);
+	}
+	// Fallback: in UE 5.7, find any boolean input pin on the result node
+	if (!ResultPin)
+	{
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input &&
+				Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
+			{
+				ResultPin = Pin;
+				break;
+			}
+		}
+	}
+	// Final fallback: any input pin
+	if (!ResultPin)
+	{
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				ResultPin = Pin;
+				break;
+			}
+		}
 	}
 
 	if (!ResultPin)
 	{
-		OutError = TEXT("Cannot find transition result input pin");
+		// Debug: list available input pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Cannot find transition result input pin. Available input pins: %s"),
+			AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 
@@ -425,16 +525,44 @@ bool FAnimGraphEditor::ConnectToOutputPose(
 		return false;
 	}
 
-	// Find pose output pin on anim node
+	// Find pose output pin on anim node - try multiple common names
 	UEdGraphPin* PosePin = FindPinByName(AnimNode, TEXT("Pose"), EGPD_Output);
 	if (!PosePin)
 	{
 		PosePin = FindPinByName(AnimNode, TEXT("Output"), EGPD_Output);
 	}
+	if (!PosePin)
+	{
+		PosePin = FindPinByName(AnimNode, TEXT("Output Pose"), EGPD_Output);
+	}
+	// Fallback: find any output pin that's a pose link type
+	if (!PosePin)
+	{
+		for (UEdGraphPin* Pin : AnimNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output &&
+				(Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct ||
+				 Pin->PinName.ToString().Contains(TEXT("Pose"), ESearchCase::IgnoreCase)))
+			{
+				PosePin = Pin;
+				break;
+			}
+		}
+	}
 
 	if (!PosePin)
 	{
-		OutError = TEXT("Animation node has no pose output pin");
+		// Debug: list available output pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : AnimNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Animation node has no pose output pin. Available output pins: %s"),
+			AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 
@@ -446,16 +574,48 @@ bool FAnimGraphEditor::ConnectToOutputPose(
 		return false;
 	}
 
-	// Find result input pin
+	// Find result input pin - try multiple common names for UE 5.7
 	UEdGraphPin* ResultPin = FindPinByName(ResultNode, TEXT("Result"), EGPD_Input);
 	if (!ResultPin)
 	{
 		ResultPin = FindPinByName(ResultNode, TEXT("Pose"), EGPD_Input);
 	}
+	if (!ResultPin)
+	{
+		ResultPin = FindPinByName(ResultNode, TEXT("Output Pose"), EGPD_Input);
+	}
+	if (!ResultPin)
+	{
+		ResultPin = FindPinByName(ResultNode, TEXT("InPose"), EGPD_Input);
+	}
+	// Fallback: in UE 5.7, the StateResult node may have an empty-named pose input pin
+	// or it may be the first/only input pin - try finding any input pose link
+	if (!ResultPin)
+	{
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				// Accept any input pin on the result node
+				ResultPin = Pin;
+				break;
+			}
+		}
+	}
 
 	if (!ResultPin)
 	{
-		OutError = TEXT("Cannot find state result input pin");
+		// Debug: list available input pins
+		FString AvailablePins;
+		for (UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			if (Pin->Direction == EGPD_Input)
+			{
+				AvailablePins += FString::Printf(TEXT("[%s] "), *Pin->PinName.ToString());
+			}
+		}
+		OutError = FString::Printf(TEXT("Cannot find state result input pin. Available input pins: %s"),
+			AvailablePins.IsEmpty() ? TEXT("none") : *AvailablePins);
 		return false;
 	}
 

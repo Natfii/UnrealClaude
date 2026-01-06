@@ -66,17 +66,24 @@ bool FMCPTool_DeleteActors_GetInfo::RunTest(const FString& Parameters)
 	TestTrue("Description should not be empty", !Info.Description.IsEmpty());
 	TestTrue("Should have parameters", Info.Parameters.Num() > 0);
 
-	// Check required parameters
-	bool bHasNamesParam = false;
+	// Check parameters - delete_actors has multiple optional deletion modes
+	bool bHasActorNamesParam = false;
+	bool bHasActorNameParam = false;
 	for (const FMCPToolParameter& Param : Info.Parameters)
 	{
-		if (Param.Name == TEXT("names"))
+		if (Param.Name == TEXT("actor_names"))
 		{
-			bHasNamesParam = true;
-			TestTrue("names parameter should be required", Param.bRequired);
+			bHasActorNamesParam = true;
+			// actor_names is optional (one of three deletion modes)
+			TestFalse("actor_names parameter should be optional", Param.bRequired);
+		}
+		if (Param.Name == TEXT("actor_name"))
+		{
+			bHasActorNameParam = true;
 		}
 	}
-	TestTrue("Should have 'names' parameter", bHasNamesParam);
+	TestTrue("Should have 'actor_names' parameter", bHasActorNamesParam);
+	TestTrue("Should have 'actor_name' parameter", bHasActorNameParam);
 
 	return true;
 }
@@ -128,18 +135,18 @@ bool FMCPTool_SetProperty_GetInfo::RunTest(const FString& Parameters)
 
 	// Check for key parameters
 	bool bHasActorName = false;
-	bool bHasPropertyPath = false;
+	bool bHasProperty = false;
 	bool bHasValue = false;
 
 	for (const FMCPToolParameter& Param : Info.Parameters)
 	{
 		if (Param.Name == TEXT("actor_name")) bHasActorName = true;
-		if (Param.Name == TEXT("property_path")) bHasPropertyPath = true;
+		if (Param.Name == TEXT("property")) bHasProperty = true;
 		if (Param.Name == TEXT("value")) bHasValue = true;
 	}
 
 	TestTrue("Should have 'actor_name' parameter", bHasActorName);
-	TestTrue("Should have 'property_path' parameter", bHasPropertyPath);
+	TestTrue("Should have 'property' parameter", bHasProperty);
 	TestTrue("Should have 'value' parameter", bHasValue);
 
 	return true;
@@ -200,7 +207,7 @@ bool FMCPTool_SpawnActor_InvalidActorName::RunTest(const FString& Parameters)
 
 	// Create params with invalid actor name (contains dangerous characters)
 	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-	Params->SetStringField(TEXT("class"), TEXT("StaticMeshActor"));
+	Params->SetStringField(TEXT("class"), TEXT("/Script/Engine.StaticMeshActor"));
 	Params->SetStringField(TEXT("name"), TEXT("Actor<script>"));
 
 	FMCPToolResult Result = Tool.Execute(Params);
@@ -253,21 +260,21 @@ bool FMCPTool_SetProperty_MissingRequiredParams::RunTest(const FString& Paramete
 	// Test missing actor_name
 	{
 		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
-		Params->SetStringField(TEXT("property_path"), TEXT("MyProperty"));
+		Params->SetStringField(TEXT("property"), TEXT("MyProperty"));
 		Params->SetStringField(TEXT("value"), TEXT("test"));
 
 		FMCPToolResult Result = Tool.Execute(Params);
 		TestFalse("Should fail without actor_name", Result.bSuccess);
 	}
 
-	// Test missing property_path
+	// Test missing property
 	{
 		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
 		Params->SetStringField(TEXT("actor_name"), TEXT("TestActor"));
 		Params->SetStringField(TEXT("value"), TEXT("test"));
 
 		FMCPToolResult Result = Tool.Execute(Params);
-		TestFalse("Should fail without property_path", Result.bSuccess);
+		TestFalse("Should fail without property", Result.bSuccess);
 	}
 
 	return true;
@@ -289,9 +296,9 @@ bool FMCPTool_SpawnActor_EnginePathBlocked::RunTest(const FString& Parameters)
 	TestTrue("Engine.Actor should be valid",
 		FMCPParamValidator::ValidateClassPath(TEXT("/Script/Engine.Actor"), Error));
 
-	// These should still be valid class paths (blocking is for Blueprint paths)
-	TestTrue("StaticMeshActor should be valid",
-		FMCPParamValidator::ValidateClassPath(TEXT("StaticMeshActor"), Error));
+	// Full class paths should be valid
+	TestTrue("/Script/Engine.StaticMeshActor should be valid",
+		FMCPParamValidator::ValidateClassPath(TEXT("/Script/Engine.StaticMeshActor"), Error));
 
 	// Empty class should be invalid
 	TestFalse("Empty class should be invalid",
@@ -316,7 +323,7 @@ bool FMCPTool_SetProperty_InvalidPropertyPath::RunTest(const FString& Parameters
 	{
 		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
 		Params->SetStringField(TEXT("actor_name"), TEXT("TestActor"));
-		Params->SetStringField(TEXT("property_path"), TEXT("..Parent.Property"));
+		Params->SetStringField(TEXT("property"), TEXT("..Parent.Property"));
 		Params->SetStringField(TEXT("value"), TEXT("evil"));
 
 		FMCPToolResult Result = Tool.Execute(Params);
@@ -327,7 +334,7 @@ bool FMCPTool_SetProperty_InvalidPropertyPath::RunTest(const FString& Parameters
 	{
 		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
 		Params->SetStringField(TEXT("actor_name"), TEXT("TestActor"));
-		Params->SetStringField(TEXT("property_path"), TEXT("Property<T>"));
+		Params->SetStringField(TEXT("property"), TEXT("Property<T>"));
 		Params->SetStringField(TEXT("value"), TEXT("test"));
 
 		FMCPToolResult Result = Tool.Execute(Params);
@@ -401,6 +408,9 @@ bool FMCPToolRegistry_ToolsRegistered::RunTest(const FString& Parameters)
 	TestNotNull("blueprint_query should be registered", Registry.FindTool(TEXT("blueprint_query")));
 	TestNotNull("blueprint_modify should be registered", Registry.FindTool(TEXT("blueprint_modify")));
 
+	// Animation Blueprint tools should be registered
+	TestNotNull("anim_blueprint_modify should be registered", Registry.FindTool(TEXT("anim_blueprint_modify")));
+
 	return true;
 }
 
@@ -417,6 +427,357 @@ bool FMCPToolRegistry_ToolNotFound::RunTest(const FString& Parameters)
 	// Non-existent tools should return nullptr
 	TestNull("nonexistent_tool should not be found", Registry.FindTool(TEXT("nonexistent_tool")));
 	TestNull("empty string should not find tool", Registry.FindTool(TEXT("")));
+
+	return true;
+}
+
+// ===== Animation Blueprint Tool Tests =====
+// Tests for anim_blueprint_modify tool
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_GetInfo,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.GetInfo",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_GetInfo::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("anim_blueprint_modify tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	FMCPToolInfo Info = Tool->GetInfo();
+
+	TestEqual("Tool name should be anim_blueprint_modify", Info.Name, TEXT("anim_blueprint_modify"));
+	TestTrue("Description should not be empty", !Info.Description.IsEmpty());
+	TestTrue("Should have parameters", Info.Parameters.Num() > 0);
+
+	// Check required parameters
+	bool bHasBlueprintPath = false;
+	bool bHasOperation = false;
+	bool bHasStateMachine = false;
+	bool bHasStateName = false;
+	bool bHasNodeType = false;
+
+	for (const FMCPToolParameter& Param : Info.Parameters)
+	{
+		if (Param.Name == TEXT("blueprint_path"))
+		{
+			bHasBlueprintPath = true;
+			TestTrue("blueprint_path should be required", Param.bRequired);
+		}
+		if (Param.Name == TEXT("operation"))
+		{
+			bHasOperation = true;
+			TestTrue("operation should be required", Param.bRequired);
+		}
+		if (Param.Name == TEXT("state_machine")) bHasStateMachine = true;
+		if (Param.Name == TEXT("state_name")) bHasStateName = true;
+		if (Param.Name == TEXT("node_type")) bHasNodeType = true;
+	}
+
+	TestTrue("Should have 'blueprint_path' parameter", bHasBlueprintPath);
+	TestTrue("Should have 'operation' parameter", bHasOperation);
+	TestTrue("Should have 'state_machine' parameter", bHasStateMachine);
+	TestTrue("Should have 'state_name' parameter", bHasStateName);
+	TestTrue("Should have 'node_type' parameter", bHasNodeType);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_MissingBlueprintPath,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.MissingBlueprintPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_MissingBlueprintPath::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// Create params without blueprint_path
+	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("operation"), TEXT("get_info"));
+
+	FMCPToolResult Result = Tool->Execute(Params);
+
+	TestFalse("Should fail without blueprint_path", Result.bSuccess);
+	TestTrue("Error should mention blueprint_path or Missing",
+		Result.Message.Contains(TEXT("blueprint_path")) || Result.Message.Contains(TEXT("Missing")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_MissingOperation,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.MissingOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_MissingOperation::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// Create params without operation
+	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+
+	FMCPToolResult Result = Tool->Execute(Params);
+
+	TestFalse("Should fail without operation", Result.bSuccess);
+	TestTrue("Error should mention operation or Missing",
+		Result.Message.Contains(TEXT("operation")) || Result.Message.Contains(TEXT("Missing")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_InvalidOperation,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.InvalidOperation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_InvalidOperation::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// Create params with invalid operation
+	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+	Params->SetStringField(TEXT("operation"), TEXT("invalid_operation_xyz"));
+
+	FMCPToolResult Result = Tool->Execute(Params);
+
+	TestFalse("Should fail with invalid operation", Result.bSuccess);
+	TestTrue("Error should mention invalid or unknown operation",
+		Result.Message.Contains(TEXT("invalid")) || Result.Message.Contains(TEXT("Unknown")) || Result.Message.Contains(TEXT("operation")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_InvalidBlueprintPath,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.InvalidBlueprintPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_InvalidBlueprintPath::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// Test path traversal attack
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/../Engine/SomeBP"));
+		Params->SetStringField(TEXT("operation"), TEXT("get_info"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("Path traversal should be blocked", Result.bSuccess);
+	}
+
+	// Test engine path access
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Engine/SomeAnimBP"));
+		Params->SetStringField(TEXT("operation"), TEXT("get_info"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("Engine path should be blocked", Result.bSuccess);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_AddStateMissingParams,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.AddStateMissingParams",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_AddStateMissingParams::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// add_state without state_machine
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("add_state"));
+		Params->SetStringField(TEXT("state_name"), TEXT("NewState"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("add_state should fail without state_machine", Result.bSuccess);
+	}
+
+	// add_state without state_name
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("add_state"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("add_state should fail without state_name", Result.bSuccess);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_AddTransitionMissingParams,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.AddTransitionMissingParams",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_AddTransitionMissingParams::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// add_transition without from_state
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("add_transition"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+		Params->SetStringField(TEXT("to_state"), TEXT("Running"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("add_transition should fail without from_state", Result.bSuccess);
+	}
+
+	// add_transition without to_state
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("add_transition"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+		Params->SetStringField(TEXT("from_state"), TEXT("Idle"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("add_transition should fail without to_state", Result.bSuccess);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_AddConditionNodeMissingParams,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.AddConditionNodeMissingParams",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_AddConditionNodeMissingParams::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// add_condition_node without node_type
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("add_condition_node"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+		Params->SetStringField(TEXT("from_state"), TEXT("Idle"));
+		Params->SetStringField(TEXT("to_state"), TEXT("Running"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("add_condition_node should fail without node_type", Result.bSuccess);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_SetStateAnimationMissingParams,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.SetStateAnimationMissingParams",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_SetStateAnimationMissingParams::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	// set_state_animation without animation_path
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("set_state_animation"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+		Params->SetStringField(TEXT("state_name"), TEXT("Idle"));
+		Params->SetStringField(TEXT("animation_type"), TEXT("sequence"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("set_state_animation should fail without animation_path", Result.bSuccess);
+	}
+
+	// set_state_animation without state_name
+	{
+		TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("blueprint_path"), TEXT("/Game/Characters/ABP_Test"));
+		Params->SetStringField(TEXT("operation"), TEXT("set_state_animation"));
+		Params->SetStringField(TEXT("state_machine"), TEXT("Locomotion"));
+		Params->SetStringField(TEXT("animation_path"), TEXT("/Game/Animations/Idle"));
+		Params->SetStringField(TEXT("animation_type"), TEXT("sequence"));
+
+		FMCPToolResult Result = Tool->Execute(Params);
+		TestFalse("set_state_animation should fail without state_name", Result.bSuccess);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_AnimBlueprintModify_ToolAnnotations,
+	"UnrealClaude.MCP.Tools.AnimBlueprintModify.ToolAnnotations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_AnimBlueprintModify_ToolAnnotations::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("anim_blueprint_modify"));
+	TestNotNull("Tool should exist", Tool);
+
+	if (!Tool) return false;
+
+	FMCPToolInfo Info = Tool->GetInfo();
+
+	// Animation Blueprint tool should be marked as modifying (not read-only, not destructive)
+	TestFalse("Should not be marked as read-only", Info.Annotations.bReadOnlyHint);
+	TestFalse("Should not be marked as destructive", Info.Annotations.bDestructiveHint);
 
 	return true;
 }
