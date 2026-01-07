@@ -52,8 +52,8 @@ public:
 	/** Start the task queue worker thread */
 	void Start();
 
-	/** Stop the task queue and cancel pending tasks */
-	void Stop();
+	/** Shutdown the task queue and cancel pending tasks (call from main thread) */
+	void Shutdown();
 
 	/**
 	 * Submit a tool for async execution
@@ -105,6 +105,7 @@ protected:
 	// FRunnable interface
 	virtual bool Init() override;
 	virtual uint32 Run() override;
+	virtual void Stop() override;
 	virtual void Exit() override;
 
 private:

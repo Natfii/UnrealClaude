@@ -54,7 +54,7 @@ void FMCPToolRegistry::StopTaskQueue()
 {
 	if (TaskQueue.IsValid())
 	{
-		TaskQueue->Stop();
+		TaskQueue->Shutdown();
 	}
 }
 

@@ -14,11 +14,15 @@ FMCPTaskQueue::FMCPTaskQueue(FMCPToolRegistry* InToolRegistry)
 	, LastCleanupTime(FDateTime::UtcNow())
 {
 	WakeUpEvent = FPlatformProcess::GetSynchEventFromPool();
+	if (!WakeUpEvent)
+	{
+		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to get sync event from pool for task queue"));
+	}
 }
 
 FMCPTaskQueue::~FMCPTaskQueue()
 {
-	Stop();
+	Shutdown();
 	if (WakeUpEvent)
 	{
 		FPlatformProcess::ReturnSynchEventToPool(WakeUpEvent);
@@ -33,24 +37,66 @@ void FMCPTaskQueue::Start()
 		return; // Already running
 	}
 
+	// Reset stop flag before creating thread
 	bShouldStop = false;
-	WorkerThread = FRunnableThread::Create(this, TEXT("MCPTaskQueue"), 0, TPri_BelowNormal);
-	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue started"));
+
+	// Create the thread with default parameters for stability
+	WorkerThread = FRunnableThread::Create(
+		this,
+		TEXT("MCPTaskQueue"),
+		0,  // Default stack size
+		TPri_BelowNormal
+	);
+
+	if (WorkerThread)
+	{
+		UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue started"));
+	}
+	else
+	{
+		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to create MCP Task Queue thread"));
+	}
 }
 
 void FMCPTaskQueue::Stop()
 {
-	if (!WorkerThread)
+	// This is called by FRunnableThread when Kill() is invoked
+	// Set flag to stop the Run() loop
+	bShouldStop = true;
+
+	// Trigger event to wake up the thread if it's waiting
+	if (WakeUpEvent)
+	{
+		WakeUpEvent->Trigger();
+	}
+}
+
+void FMCPTaskQueue::Shutdown()
+{
+	FRunnableThread* ThreadToKill = WorkerThread;
+	if (!ThreadToKill)
 	{
 		return;
 	}
 
-	bShouldStop = true;
-	WakeUpEvent->Trigger();
-
-	WorkerThread->WaitForCompletion();
-	delete WorkerThread;
+	// Clear the pointer first to prevent re-entry
 	WorkerThread = nullptr;
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue shutting down..."));
+
+	// Set stop flag explicitly (in case Kill doesn't call Stop properly)
+	bShouldStop = true;
+
+	// Trigger wake event to unblock any waits
+	if (WakeUpEvent)
+	{
+		WakeUpEvent->Trigger();
+	}
+
+	// Kill the thread - this calls our Stop() method then waits
+	ThreadToKill->Kill(true);
+
+	delete ThreadToKill;
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue stopped"));
 }
@@ -97,7 +143,10 @@ FGuid FMCPTaskQueue::SubmitTask(const FString& ToolName, TSharedPtr<FJsonObject>
 	UE_LOG(LogUnrealClaude, Log, TEXT("Task submitted: %s (tool: %s)"), *Task->TaskId.ToString(), *ToolName);
 
 	// Wake up worker thread
-	WakeUpEvent->Trigger();
+	if (WakeUpEvent)
+	{
+		WakeUpEvent->Trigger();
+	}
 
 	return Task->TaskId;
 }
@@ -238,12 +287,11 @@ uint32 FMCPTaskQueue::Run()
 				{
 					ExecuteTask(Task);
 					RunningTaskCount--;
-					WakeUpEvent->Trigger(); // Wake up to process more tasks
 				});
 			}
 		}
 
-		// Periodic cleanup
+		// Periodic cleanup (only every 60 seconds)
 		FDateTime Now = FDateTime::UtcNow();
 		if ((Now - LastCleanupTime).GetTotalSeconds() >= Config.CleanupIntervalSeconds)
 		{
@@ -252,8 +300,8 @@ uint32 FMCPTaskQueue::Run()
 			LastCleanupTime = Now;
 		}
 
-		// Wait for new tasks or timeout
-		WakeUpEvent->Wait(1000); // Wake every second to check timeouts
+		// Sleep to avoid consuming 100% CPU and allow responsive shutdown
+		FPlatformProcess::Sleep(0.01f);
 	}
 
 	return 0;

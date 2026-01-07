@@ -29,7 +29,7 @@ static const FName ClaudeTabName("ClaudeAssistant");
 
 void FUnrealClaudeModule::StartupModule()
 {
-	UE_LOG(LogUnrealClaude, Log, TEXT("UnrealClaude module starting up"));
+	UE_LOG(LogUnrealClaude, Warning, TEXT("=== UnrealClaude BUILD 20260107-1450 THREAD_TESTS_DISABLED ==="));
 	
 	// Register commands
 	FUnrealClaudeCommands::Register();
