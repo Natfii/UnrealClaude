@@ -35,6 +35,7 @@ yarn-error.log
 
 # Claude Code session data
 .claude/
+CLAUDE.md
 
 # macOS
 .DS_Store
@@ -82,3 +83,6 @@ coverage/
 *.rar
 *.7z
 *.tar.gz
+
+# Personal CLAUDE.md (use CLAUDE.md.default as template)
+UnrealClaude/CLAUDE.md

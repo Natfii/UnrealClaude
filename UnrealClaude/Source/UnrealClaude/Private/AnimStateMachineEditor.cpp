@@ -1,4 +1,4 @@
-// Copyright Your Name. All Rights Reserved.
+// Copyright Natali Caggiano. All Rights Reserved.
 
 #include "AnimStateMachineEditor.h"
 #include "AnimGraphNode_StateMachine.h"
@@ -88,6 +88,16 @@ UAnimGraphNode_StateMachine* FAnimStateMachineEditor::CreateStateMachine(
 	);
 
 	StateMachineNode->EditorStateMachineGraph = SMGraph;
+
+	// Call schema to create default nodes (including entry node)
+	const UAnimationStateMachineSchema* Schema = CastChecked<UAnimationStateMachineSchema>(SMGraph->GetSchema());
+	if (Schema)
+	{
+		Schema->CreateDefaultNodesForGraph(*SMGraph);
+	}
+
+	// Set the owner reference
+	SMGraph->OwnerAnimGraphNode = StateMachineNode;
 
 	// Generate node ID
 	OutNodeId = FString::Printf(TEXT("StateMachine_%s"), *StateMachineName.Replace(TEXT(" "), TEXT("_")));

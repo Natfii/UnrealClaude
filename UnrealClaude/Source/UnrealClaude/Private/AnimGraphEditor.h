@@ -1,10 +1,11 @@
-// Copyright Your Name. All Rights Reserved.
+// Copyright Natali Caggiano. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Animation/AnimBlueprint.h"
 #include "Dom/JsonObject.h"
+#include "AnimNodePinUtils.h"  // For FPinSearchConfig
 
 // Forward declarations
 class UAnimGraphNode_StateMachine;
@@ -209,6 +210,30 @@ public:
 		EEdGraphPinDirection Direction = EGPD_MAX
 	);
 
+	/**
+	 * Find pin using configuration with multiple fallback strategies
+	 * (Delegates to FAnimNodePinUtils)
+	 *
+	 * @param Node - Node to search
+	 * @param Config - Search configuration (see FPinSearchConfig in AnimNodePinUtils.h)
+	 * @param OutError - Optional: If provided and no pin found, populated with available pins list
+	 * @return Found pin or nullptr
+	 */
+	static UEdGraphPin* FindPinWithFallbacks(
+		UEdGraphNode* Node,
+		const FPinSearchConfig& Config,
+		FString* OutError = nullptr
+	);
+
+	/**
+	 * Build error message listing available pins on a node
+	 */
+	static FString BuildAvailablePinsError(
+		UEdGraphNode* Node,
+		EEdGraphPinDirection Direction,
+		const FString& Context
+	);
+
 	// ===== Node ID System =====
 
 	/**
@@ -307,7 +332,7 @@ private:
 	static UEdGraphNode* CreateTimeRemainingNode(UEdGraph* Graph,
 		const TSharedPtr<FJsonObject>& Params, FVector2D Position, FString& OutError);
 	static UEdGraphNode* CreateComparisonNode(UEdGraph* Graph, const FString& ComparisonType,
-		const TSharedPtr<FJsonObject>& Params, FVector2D Position, FString& OutError);
+		const TSharedPtr<FJsonObject>& Params, FVector2D Position, FString& OutError, bool bIsBooleanType = false);
 	static UEdGraphNode* CreateLogicNode(UEdGraph* Graph, const FString& LogicType,
 		FVector2D Position, FString& OutError);
 	static UEdGraphNode* CreateVariableGetNode(UEdGraph* Graph, UAnimBlueprint* AnimBP,

@@ -1,0 +1,159 @@
+# UnrealClaude - Claude Code Instructions for Unreal Engine 5.7
+
+This file provides guidance to Claude Code when working with the UnrealClaude plugin and Unreal Engine 5.7 projects.
+
+## Setup
+
+Copy this file to `CLAUDE.md` in the same directory and customize the build paths for your system.
+
+## Project Overview
+
+**UnrealClaude** is an Unreal Engine 5.7 plugin that provides MCP (Model Context Protocol) integration, enabling Claude AI to interact directly with the Unreal Editor via REST API tools.
+
+### Key Directories
+- `Source/UnrealClaude/Private/MCP/` - MCP server and tool implementations
+- `Source/UnrealClaude/Private/MCP/Tools/` - Individual MCP tools
+- `Source/UnrealClaude/Private/Tests/` - Automation tests
+- `Resources/mcp-bridge/` - Node.js MCP bridge
+
+### Build Commands
+```bash
+# Build plugin - customize these paths for your system:
+# - UE_PATH: Your Unreal Engine installation
+# - PLUGIN_PATH: Path to UnrealClaude.uplugin
+# - OUTPUT_PATH: Temporary build output directory
+
+"<UE_PATH>/Engine/Build/BatchFiles/RunUAT.bat" BuildPlugin -Plugin="<PLUGIN_PATH>/UnrealClaude.uplugin" -Package="<OUTPUT_PATH>" -TargetPlatforms=Win64 -Rocket
+
+# Run tests (in Unreal Editor console)
+Automation RunTests UnrealClaude
+```
+
+---
+
+## Unreal Engine 5.7 C++ Standards
+
+### IMPORTANT: Stay Focused on UE 5.7
+- This project targets **Unreal Engine 5.7.1** exclusively
+- Use UE 5.7 API patterns and conventions
+- Do NOT suggest deprecated APIs or patterns from older engine versions
+
+### File Organization
+- **Maximum 500 lines per file** - Split large files into logical units
+- **Maximum 50 lines per function** - Extract helper functions for clarity
+- **Private/** folder for implementation files
+- **Public/** folder for headers meant for external use
+
+### UPROPERTY Specifiers (UE 5.7)
+```cpp
+// Editor-visible and Blueprint-accessible
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Category")
+int32 EditableProperty;
+
+// Asset references (UE 5.x preferred)
+UPROPERTY(EditAnywhere)
+TObjectPtr<UTexture2D> Texture;  // Hard reference
+
+UPROPERTY(EditAnywhere)
+TSoftObjectPtr<UStaticMesh> MeshAsset;  // Soft reference
+```
+
+### UFUNCTION Specifiers (UE 5.7)
+```cpp
+// Blueprint callable (has execution pins)
+UFUNCTION(BlueprintCallable, Category = "MyCategory")
+void DoSomething();
+
+// Blueprint pure (no execution pins, no side effects)
+UFUNCTION(BlueprintPure, Category = "MyCategory")
+int32 GetValue() const;
+```
+
+---
+
+## MCP Tool Development Guidelines
+
+### Creating New MCP Tools
+1. Create header in `Private/MCP/Tools/MCPTool_YourTool.h`
+2. Inherit from `FMCPToolBase`
+3. Implement `GetInfo()` with proper parameters and annotations
+4. Implement `Execute()` with parameter validation
+5. Register in `MCPToolRegistry.h`
+6. Add tests in `Private/Tests/MCPToolTests.cpp`
+
+### Tool Parameter Validation Pattern
+```cpp
+FMCPToolResult FMCPTool_YourTool::Execute(const TSharedRef<FJsonObject>& Params)
+{
+    // Extract and validate required parameters
+    FString RequiredParam;
+    TOptional<FMCPToolResult> Error;
+    if (!ExtractRequiredString(Params, TEXT("param_name"), RequiredParam, Error))
+    {
+        return Error.GetValue();
+    }
+
+    // Do work...
+    return FMCPToolResult::Success(TEXT("Operation completed"));
+}
+```
+
+### Tool Annotations
+```cpp
+// Read-only tool (safe, no modifications)
+Info.Annotations = FMCPToolAnnotations::ReadOnly();
+
+// Modifying tool (changes state, reversible)
+Info.Annotations = FMCPToolAnnotations::Modifying();
+
+// Destructive tool (cannot be undone via MCP)
+Info.Annotations = FMCPToolAnnotations::Destructive();
+```
+
+---
+
+## Testing Standards
+
+### Automation Test Pattern
+```cpp
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FMyTest,
+    "UnrealClaude.Category.TestName",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMyTest::RunTest(const FString& Parameters)
+{
+    TestTrue("Description of what should be true", bCondition);
+    TestEqual("Values should match", ActualValue, ExpectedValue);
+    return true;
+}
+```
+
+### Test Categories
+- `UnrealClaude.MCP.Tools.*` - Individual tool tests
+- `UnrealClaude.MCP.ParamValidator.*` - Parameter validation tests
+- `UnrealClaude.MCP.Registry.*` - Tool registry tests
+
+---
+
+## Security Considerations
+
+### Parameter Validation (ALWAYS DO THIS)
+1. **Path Validation**: Block `/Engine/`, `/Script/`, path traversal (`../`)
+2. **Actor Name Validation**: Block special characters `<>|&;$(){}[]!*?~`
+3. **Console Command Validation**: Block dangerous commands (quit, crash, shutdown)
+4. **Numeric Validation**: Check for NaN, Infinity, reasonable bounds
+
+---
+
+## Commit Standards
+
+When committing changes to this project:
+- `feat:` New MCP tools or features
+- `fix:` Bug fixes
+- `test:` Test additions or fixes
+- `docs:` Documentation updates
+- `refactor:` Code refactoring without behavior changes
+
+Always run `Automation RunTests UnrealClaude` before committing.
