@@ -83,6 +83,8 @@ public:
 			"- 'set_pin_default_value': Set pin value with type validation\n"
 			"- 'add_comparison_chain': Add GetVariable->Comparison->Result (auto-ANDs with existing)\n"
 			"- 'validate_blueprint': Return compile errors with full diagnostics\n\n"
+			"Bulk Operations (NEW):\n"
+			"- 'setup_transition_conditions': Setup conditions for multiple transitions using pattern matching\n\n"
 			"AnimGraph Connection:\n"
 			"- 'connect_state_machine_to_output': Connect State Machine to AnimGraph Output Pose\n\n"
 			"Animation Assignment:\n"
@@ -119,7 +121,9 @@ public:
 			FMCPToolParameter(TEXT("comparison_type"), TEXT("string"), TEXT("Comparison type: Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual (for add_comparison_chain)"), false),
 			FMCPToolParameter(TEXT("compare_value"), TEXT("string"), TEXT("Value to compare against (for add_comparison_chain)"), false),
 			FMCPToolParameter(TEXT("pin_value"), TEXT("string"), TEXT("Default value for the pin (for set_pin_default_value)"), false),
-			FMCPToolParameter(TEXT("pin_name"), TEXT("string"), TEXT("Pin name to set value (for set_pin_default_value)"), false)
+			FMCPToolParameter(TEXT("pin_name"), TEXT("string"), TEXT("Pin name to set value (for set_pin_default_value)"), false),
+			// Bulk operation parameters
+			FMCPToolParameter(TEXT("rules"), TEXT("array"), TEXT("Array of condition rules for setup_transition_conditions. Each rule: {match: {from, to}, conditions: [...], logic: 'AND'|'OR'}"), false)
 		};
 		Info.Annotations = FMCPToolAnnotations::Modifying();
 		return Info;
@@ -154,6 +158,9 @@ private:
 	FMCPToolResult HandleSetPinDefaultValue(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleAddComparisonChain(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleValidateBlueprint(const FString& BlueprintPath);
+
+	// Bulk operation handler
+	FMCPToolResult HandleSetupTransitionConditions(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 
 	// Helper to extract position
 	FVector2D ExtractPosition(const TSharedRef<FJsonObject>& Params);

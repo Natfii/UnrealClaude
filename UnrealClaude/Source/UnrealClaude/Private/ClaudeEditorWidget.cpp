@@ -576,7 +576,7 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		StatusMessage += TEXT("Troubleshooting:\n");
 		StatusMessage += TEXT("  • Check Output Log for MCP errors\n");
 		StatusMessage += TEXT("  • Run: npm install in Resources/mcp-bridge\n");
-		StatusMessage += TEXT("  • Verify port 3000 is available\n");
+		StatusMessage += FString::Printf(TEXT("  • Verify port %d is available\n"), UnrealClaudeConstants::MCPServer::DefaultPort);
 		StatusMessage += TEXT("─────────────────────────────────");
 		return StatusMessage;
 	}

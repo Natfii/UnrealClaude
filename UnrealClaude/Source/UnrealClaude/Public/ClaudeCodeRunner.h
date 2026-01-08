@@ -76,4 +76,13 @@ private:
 	void* ProcessHandle;
 	void* ReadPipe;
 	void* WritePipe;
+	void* StdInReadPipe;
+	void* StdInWritePipe;
+
+	// Last Windows error code for detailed error reporting
+	uint32 LastProcessError = 0;
+
+	// Temp file paths for prompts (to avoid command line length limits)
+	FString SystemPromptFilePath;
+	FString PromptFilePath;
 };

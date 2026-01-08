@@ -458,7 +458,47 @@ public:
 		FString& OutError
 	);
 
+	/**
+	 * Setup transition conditions in bulk using pattern matching (setup_transition_conditions)
+	 *
+	 * Supports multiple matching modes:
+	 * - Exact: "Idle" matches only "Idle"
+	 * - Wildcard: "*" matches any, "Attack_*" matches states starting with "Attack_"
+	 * - Regex: "^Attack_\\d+$" matches Attack_1, Attack_2, etc.
+	 * - List: ["Idle", "Walk", "Run"] matches any of these
+	 *
+	 * @param AnimBP - Animation Blueprint to modify
+	 * @param StateMachineName - State machine name
+	 * @param Rules - Array of rule objects with match patterns and conditions
+	 * @param OutError - Error message if failed
+	 * @return JSON result with matched transitions and results
+	 *
+	 * Rule format:
+	 * {
+	 *   "match": {
+	 *     "from": "Idle" | "*" | "Attack_*" | ["Idle", "Walk"],
+	 *     "to": "Walk" | "^.*_\\d$" | ["Run", "Jump"]
+	 *   },
+	 *   "conditions": [
+	 *     {"variable": "Speed", "comparison": "Greater", "value": "10"},
+	 *     {"variable": "bIsInAir", "comparison": "Equal", "value": "false"},
+	 *     {"type": "TimeRemaining", "comparison": "Less", "value": "0.1"}
+	 *   ],
+	 *   "logic": "AND" | "OR" (default: AND)
+	 * }
+	 */
+	static TSharedPtr<FJsonObject> SetupTransitionConditions(
+		UAnimBlueprint* AnimBP,
+		const FString& StateMachineName,
+		const TArray<TSharedPtr<FJsonValue>>& Rules,
+		FString& OutError
+	);
+
 private:
+	// Pattern matching helpers for SetupTransitionConditions
+	static bool MatchesPattern(const FString& StateName, const TSharedPtr<FJsonValue>& Pattern);
+	static bool MatchesWildcard(const FString& StateName, const FString& Pattern);
+	static bool MatchesRegex(const FString& StateName, const FString& Pattern);
 	// Internal helpers
 	static bool ValidateAnimBlueprintForOperation(UAnimBlueprint* AnimBP, FString& OutError);
 };

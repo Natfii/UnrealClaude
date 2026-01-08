@@ -171,29 +171,80 @@ All modifications auto-compile the Blueprint after changes.
 
 | Tool | Description |
 |------|-------------|
-| `anim_blueprint_modify` | Modify Animation Blueprints (state machines, states, transitions, anim nodes) |
+| `anim_blueprint_modify` | Modify Animation Blueprints (state machines, states, transitions, conditions, anim nodes) |
 
-The `anim_blueprint_modify` tool supports state machine editing:
+The `anim_blueprint_modify` tool supports comprehensive state machine editing:
 
 **State Machine Operations:**
-- `create` - Create new state machine in an Animation Blueprint
-- `delete` - Delete a state machine
-- `rename` - Rename a state machine
+- `create_state_machine` - Create new state machine in an Animation Blueprint
+- `get_state_machine` - Get detailed state machine info
+- `get_info` - Get Animation Blueprint structure overview
 - `set_entry_state` - Set the default entry state
-- `list` - List all state machines in an Animation Blueprint
 
 **State Operations:**
-- `create` - Create a new state in a state machine
-- `delete` - Delete a state
-- `rename` - Rename a state
+- `add_state` - Create a new state in a state machine
+- `remove_state` - Delete a state
 
 **Transition Operations:**
-- `create` - Create a transition between two states
-- `delete` - Delete a transition
+- `add_transition` - Create a transition between two states
+- `remove_transition` - Delete a transition
+- `set_transition_duration` - Set blend duration
+- `set_transition_priority` - Set evaluation priority
 
-**Animation Node Operations:**
-- `add` - Add animation nodes (play_sequence, blend_space, state_result)
-- `delete` - Delete animation nodes from state graphs
+**Transition Condition Operations:**
+- `add_condition_node` - Add logic nodes (TimeRemaining, Greater, Less, And, Or, Not, GetVariable)
+- `delete_condition_node` - Remove condition node
+- `connect_condition_nodes` - Connect condition nodes together
+- `connect_to_result` - Connect condition output to transition result
+- `add_comparison_chain` - Add GetVariable → Comparison → Result chain (auto-ANDs with existing)
+
+**Bulk Transition Conditions (NEW):**
+- `setup_transition_conditions` - Set up conditions for multiple transitions using pattern matching
+
+The bulk operation supports flexible pattern matching:
+- **Exact match**: `"from": "Idle"` matches only "Idle"
+- **Wildcard**: `"*"` matches any, `"Attack_*"` matches Attack_1, Attack_2, etc.
+- **Regex**: `"^Attack_\\d+$"` for advanced patterns
+- **Array list**: `["Idle", "Walk", "Run"]` matches any listed state
+
+**Example - Setup conditions for multiple transitions:**
+```json
+{
+  "operation": "setup_transition_conditions",
+  "blueprint_path": "/Game/Characters/ABP_Character",
+  "state_machine": "Locomotion",
+  "rules": [
+    {
+      "match": { "from": "*", "to": "Walk" },
+      "conditions": [
+        {"variable": "Speed", "comparison": "Greater", "value": "10"}
+      ],
+      "logic": "AND"
+    },
+    {
+      "match": { "from": "Attack_*", "to": "*" },
+      "conditions": [
+        {"type": "TimeRemaining", "comparison": "Less", "value": "0.1"}
+      ]
+    }
+  ]
+}
+```
+
+**Batch Operations:**
+Use `operation: "batch"` with an `operations` array to execute multiple operations with a single compile:
+- Supports: `add_state`, `remove_state`, `add_transition`, `remove_transition`, `set_transition_duration`, `set_state_animation`, `add_comparison_chain`, `add_condition_node`, `connect_condition_nodes`, `connect_to_result`
+
+**Animation Assignment:**
+- `set_state_animation` - Assign AnimSequence, BlendSpace, BlendSpace1D, or Montage to states
+- `find_animations` - Search for compatible animation assets
+- `connect_state_machine_to_output` - Connect State Machine to AnimGraph Output Pose
+
+**Introspection:**
+- `get_transition_nodes` - List all nodes in transition graph(s) with pins
+- `inspect_node_pins` - Get detailed pin info for a node
+- `set_pin_default_value` - Set pin default value with type validation
+- `validate_blueprint` - Return compile errors with full diagnostics
 
 All modifications auto-compile the Animation Blueprint after changes.
 

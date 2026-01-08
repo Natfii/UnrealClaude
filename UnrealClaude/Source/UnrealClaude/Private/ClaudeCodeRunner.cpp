@@ -29,6 +29,8 @@ FClaudeCodeRunner::FClaudeCodeRunner()
 	, ProcessHandle(nullptr)
 	, ReadPipe(nullptr)
 	, WritePipe(nullptr)
+	, StdInReadPipe(nullptr)
+	, StdInWritePipe(nullptr)
 {
 }
 
@@ -67,6 +69,16 @@ void FClaudeCodeRunner::CleanupHandles()
 		CloseHandle((HANDLE)WritePipe);
 		WritePipe = nullptr;
 	}
+	if (StdInReadPipe)
+	{
+		CloseHandle((HANDLE)StdInReadPipe);
+		StdInReadPipe = nullptr;
+	}
+	if (StdInWritePipe)
+	{
+		CloseHandle((HANDLE)StdInWritePipe);
+		StdInWritePipe = nullptr;
+	}
 #endif
 }
 
@@ -87,31 +99,39 @@ FString FClaudeCodeRunner::GetClaudePath()
 	static FString CachedClaudePath;
 	static bool bHasSearched = false;
 
-	if (bHasSearched)
+	if (bHasSearched && !CachedClaudePath.IsEmpty())
 	{
+		// Only return cached path if it's valid
 		return CachedClaudePath;
 	}
+	// Allow re-search if previous search failed (CachedClaudePath is empty)
 	bHasSearched = true;
 
 	// Check common locations for claude CLI
 	TArray<FString> PossiblePaths;
-	
+
+	// User profile .local/bin (Claude Code native installer location)
+	FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+	if (!UserProfile.IsEmpty())
+	{
+		PossiblePaths.Add(FPaths::Combine(UserProfile, TEXT(".local"), TEXT("bin"), TEXT("claude.exe")));
+	}
+
 	// npm global install location
 	FString AppData = FPlatformMisc::GetEnvironmentVariable(TEXT("APPDATA"));
 	if (!AppData.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(AppData, TEXT("npm"), TEXT("claude.cmd")));
 	}
-	
+
 	// Local AppData npm
 	FString LocalAppData = FPlatformMisc::GetEnvironmentVariable(TEXT("LOCALAPPDATA"));
 	if (!LocalAppData.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(LocalAppData, TEXT("npm"), TEXT("claude.cmd")));
 	}
-	
+
 	// User profile npm
-	FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
 	if (!UserProfile.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(UserProfile, TEXT("AppData"), TEXT("Roaming"), TEXT("npm"), TEXT("claude.cmd")));
@@ -253,38 +273,78 @@ bool FClaudeCodeRunner::ExecuteSync(const FClaudeRequestConfig& Config, FString&
 	}
 }
 
-// Helper function to properly escape command line arguments for Windows cmd.exe
-// This handles all shell metacharacters to prevent command injection
+// Helper function to get a human-readable Windows error message
+static FString GetWindowsErrorMessage(uint32 ErrorCode)
+{
+#if PLATFORM_WINDOWS
+	LPWSTR MessageBuffer = nullptr;
+	DWORD Size = FormatMessageW(
+		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL,
+		ErrorCode,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		(LPWSTR)&MessageBuffer,
+		0,
+		NULL
+	);
+
+	FString Message;
+	if (Size > 0 && MessageBuffer)
+	{
+		Message = FString(MessageBuffer);
+		Message.TrimEndInline();
+		LocalFree(MessageBuffer);
+	}
+
+	// Add common explanations for frequent errors
+	switch (ErrorCode)
+	{
+	case 2:
+		Message += TEXT(" (The executable was not found at the specified path)");
+		break;
+	case 3:
+		Message += TEXT(" (The working directory does not exist)");
+		break;
+	case 5:
+		Message += TEXT(" (Access denied - check permissions or antivirus)");
+		break;
+	case 87:
+		Message += TEXT(" (Command line may be too long or malformed)");
+		break;
+	case 193:
+		Message += TEXT(" (Not a valid Windows executable)");
+		break;
+	case 740:
+		Message += TEXT(" (Requires elevation/admin rights)");
+		break;
+	}
+
+	return Message;
+#else
+	return FString::Printf(TEXT("Error code %d"), ErrorCode);
+#endif
+}
+
+// Helper function to escape command line arguments for direct CreateProcessW calls
+// This does NOT escape for cmd.exe - only handles Windows argument parsing
 static FString EscapeCommandLineArg(const FString& Arg)
 {
 	FString Escaped = Arg;
 
-	// First, escape backslashes that precede quotes (Windows cmd escaping rules)
-	// Must be done before escaping quotes themselves
-	Escaped = Escaped.Replace(TEXT("\\\""), TEXT("\\\\\""));
+	// For CreateProcessW (not going through cmd.exe), we only need to:
+	// 1. Escape backslashes that precede quotes
+	// 2. Escape double quotes
+	//
+	// Shell metacharacters (&, |, <, >, ^, etc.) do NOT need escaping when
+	// calling CreateProcessW directly - they're only special to cmd.exe
 
-	// Escape double quotes with backslash
-	Escaped = Escaped.Replace(TEXT("\""), TEXT("\\\""));
+	// Count trailing backslashes - they need special handling
+	// A backslash only needs escaping if it precedes a quote
 
-	// Escape Windows cmd.exe shell metacharacters with caret (^)
-	// These characters have special meaning in cmd.exe
-	Escaped = Escaped.Replace(TEXT("^"), TEXT("^^"));  // Caret itself (escape char)
-	Escaped = Escaped.Replace(TEXT("&"), TEXT("^&"));  // Command separator
-	Escaped = Escaped.Replace(TEXT("|"), TEXT("^|"));  // Pipe
-	Escaped = Escaped.Replace(TEXT("<"), TEXT("^<"));  // Input redirect
-	Escaped = Escaped.Replace(TEXT(">"), TEXT("^>"));  // Output redirect
-	Escaped = Escaped.Replace(TEXT("("), TEXT("^("));  // Grouping
-	Escaped = Escaped.Replace(TEXT(")"), TEXT("^)"));  // Grouping
-
-	// Escape percent signs (environment variable expansion)
-	// Need to double them to escape in cmd.exe
-	Escaped = Escaped.Replace(TEXT("%"), TEXT("%%"));
-
-	// Escape backticks (used in some shells, safer to escape)
-	Escaped = Escaped.Replace(TEXT("`"), TEXT("^`"));
-
-	// Escape exclamation marks (delayed expansion in cmd.exe)
-	Escaped = Escaped.Replace(TEXT("!"), TEXT("^^!"));
+	// Simple approach: escape all quotes with backslash
+	// This works for most cases with CreateProcessW argument parsing
+	Escaped = Escaped.Replace(TEXT("\\\""), TEXT("\\\\\""));  // \\" -> \\\\"
+	Escaped = Escaped.Replace(TEXT("\""), TEXT("\\\""));       // " -> \"
 
 	return Escaped;
 }
@@ -292,11 +352,18 @@ static FString EscapeCommandLineArg(const FString& Arg)
 // Get the plugin directory path
 static FString GetPluginDirectory()
 {
-	// Try engine plugins first (installed location)
-	FString EnginePluginPath = FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("Marketplace"), TEXT("UnrealClaude"));
+	// Try engine plugins directly (manual install location)
+	FString EnginePluginPath = FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("UnrealClaude"));
 	if (FPaths::DirectoryExists(EnginePluginPath))
 	{
 		return EnginePluginPath;
+	}
+
+	// Try engine Marketplace plugins (Epic marketplace location)
+	FString MarketplacePluginPath = FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("Marketplace"), TEXT("UnrealClaude"));
+	if (FPaths::DirectoryExists(MarketplacePluginPath))
+	{
+		return MarketplacePluginPath;
 	}
 
 	// Try project plugins
@@ -306,6 +373,8 @@ static FString GetPluginDirectory()
 		return ProjectPluginPath;
 	}
 
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Could not find UnrealClaude plugin directory. Checked: %s, %s, %s"),
+		*EnginePluginPath, *MarketplacePluginPath, *ProjectPluginPath);
 	return FString();
 }
 
@@ -377,19 +446,30 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += FString::Printf(TEXT("--allowedTools \"%s\" "), *FString::Join(AllTools, TEXT(",")));
 	}
 
-	// System prompt (append mode to keep Claude Code's built-in context)
+	// Write prompts to files to avoid command line length limits (Error 206)
+	FString TempDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"));
+	IFileManager::Get().MakeDirectory(*TempDir, true);
+
+	// System prompt - write to file
 	if (!Config.SystemPrompt.IsEmpty())
 	{
-		FString EscapedSystemPrompt = EscapeCommandLineArg(Config.SystemPrompt);
-		CommandLine += FString::Printf(TEXT("--append-system-prompt \"%s\" "), *EscapedSystemPrompt);
+		FString SystemPromptPath = FPaths::Combine(TempDir, TEXT("system-prompt.txt"));
+		if (FFileHelper::SaveStringToFile(Config.SystemPrompt, *SystemPromptPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			SystemPromptFilePath = SystemPromptPath;
+			UE_LOG(LogUnrealClaude, Log, TEXT("System prompt written to: %s (%d chars)"), *SystemPromptPath, Config.SystemPrompt.Len());
+		}
 	}
 
-	// The prompt itself - escape and normalize whitespace
-	FString EscapedPrompt = EscapeCommandLineArg(Config.Prompt);
-	EscapedPrompt = EscapedPrompt.Replace(TEXT("\n"), TEXT(" "));
-	EscapedPrompt = EscapedPrompt.Replace(TEXT("\r"), TEXT(" "));
-	CommandLine += FString::Printf(TEXT("\"%s\""), *EscapedPrompt);
+	// User prompt - write to file
+	FString PromptPath = FPaths::Combine(TempDir, TEXT("prompt.txt"));
+	if (FFileHelper::SaveStringToFile(Config.Prompt, *PromptPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		PromptFilePath = PromptPath;
+		UE_LOG(LogUnrealClaude, Log, TEXT("Prompt written to: %s (%d chars)"), *PromptPath, Config.Prompt.Len());
+	}
 
+	// Don't add prompts to command line - we'll pipe them via stdin
 	return CommandLine;
 }
 
@@ -451,6 +531,7 @@ bool FClaudeCodeRunner::CreateProcessPipes()
 	SecurityAttributes.bInheritHandle = true;
 	SecurityAttributes.lpSecurityDescriptor = NULL;
 
+	// Create stdout pipe
 	HANDLE StdOutReadPipe = NULL;
 	HANDLE StdOutWritePipe = NULL;
 
@@ -464,16 +545,38 @@ bool FClaudeCodeRunner::CreateProcessPipes()
 
 	ReadPipe = StdOutReadPipe;
 	WritePipe = StdOutWritePipe;
+
+	// Create stdin pipe
+	HANDLE StdInReadPipeHandle = NULL;
+	HANDLE StdInWritePipeHandle = NULL;
+
+	if (!CreatePipe(&StdInReadPipeHandle, &StdInWritePipeHandle, &SecurityAttributes, 0))
+	{
+		CloseHandle(StdOutReadPipe);
+		CloseHandle(StdOutWritePipe);
+		ReadPipe = nullptr;
+		WritePipe = nullptr;
+		return false;
+	}
+
+	// Ensure write handle is not inherited (we write to it, child reads from read end)
+	SetHandleInformation(StdInWritePipeHandle, HANDLE_FLAG_INHERIT, 0);
+
+	StdInReadPipe = StdInReadPipeHandle;
+	StdInWritePipe = StdInWritePipeHandle;
+
 	return true;
 }
 
 bool FClaudeCodeRunner::LaunchProcess(const FString& FullCommand, const FString& WorkingDir)
 {
 	HANDLE StdOutWritePipe = static_cast<HANDLE>(WritePipe);
+	HANDLE StdInReadPipeHandle = static_cast<HANDLE>(StdInReadPipe);
 
 	STARTUPINFOW StartupInfo;
 	ZeroMemory(&StartupInfo, sizeof(StartupInfo));
 	StartupInfo.cb = sizeof(StartupInfo);
+	StartupInfo.hStdInput = StdInReadPipeHandle;
 	StartupInfo.hStdError = StdOutWritePipe;
 	StartupInfo.hStdOutput = StdOutWritePipe;
 	StartupInfo.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
@@ -497,13 +600,24 @@ bool FClaudeCodeRunner::LaunchProcess(const FString& FullCommand, const FString&
 
 	if (!bCreated)
 	{
+		LastProcessError = GetLastError();
+		UE_LOG(LogUnrealClaude, Error, TEXT("CreateProcessW failed with error code %d"), LastProcessError);
+		UE_LOG(LogUnrealClaude, Error, TEXT("Command: %s"), *FullCommand);
+		UE_LOG(LogUnrealClaude, Error, TEXT("Working directory: %s"), *WorkingDir);
 		return false;
 	}
 
+	LastProcessError = 0;
 	ProcessHandle = ProcessInfo.hProcess;
 	CloseHandle(ProcessInfo.hThread);
+
+	// Close the stdout write pipe (child has it now)
 	CloseHandle(StdOutWritePipe);
 	WritePipe = nullptr;
+
+	// Close the stdin read pipe (child has it now)
+	CloseHandle(StdInReadPipeHandle);
+	StdInReadPipe = nullptr;
 
 	return true;
 }
@@ -581,6 +695,21 @@ void FClaudeCodeRunner::ExecuteProcess()
 {
 #if PLATFORM_WINDOWS
 	FString ClaudePath = GetClaudePath();
+
+	// Verify the path exists
+	if (ClaudePath.IsEmpty())
+	{
+		ReportError(TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code"));
+		return;
+	}
+
+	if (!IFileManager::Get().FileExists(*ClaudePath))
+	{
+		UE_LOG(LogUnrealClaude, Error, TEXT("Claude path no longer exists: %s"), *ClaudePath);
+		ReportError(FString::Printf(TEXT("Claude CLI path invalid: %s"), *ClaudePath));
+		return;
+	}
+
 	FString CommandLine = BuildCommandLine(CurrentConfig);
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Async executing Claude: %s %s"), *ClaudePath, *CommandLine);
@@ -601,15 +730,81 @@ void FClaudeCodeRunner::ExecuteProcess()
 
 	// Build and launch the process
 	FString FullCommand = FString::Printf(TEXT("\"%s\" %s"), *ClaudePath, *CommandLine);
+	UE_LOG(LogUnrealClaude, Log, TEXT("Full command: %s"), *FullCommand);
+	UE_LOG(LogUnrealClaude, Log, TEXT("Working directory: %s"), *WorkingDir);
+
 	if (!LaunchProcess(FullCommand, WorkingDir))
 	{
 		CloseHandle(static_cast<HANDLE>(ReadPipe));
 		CloseHandle(static_cast<HANDLE>(WritePipe));
+		CloseHandle(static_cast<HANDLE>(StdInReadPipe));
+		CloseHandle(static_cast<HANDLE>(StdInWritePipe));
 		ReadPipe = nullptr;
 		WritePipe = nullptr;
-		ReportError(TEXT("Failed to start Claude process"));
+		StdInReadPipe = nullptr;
+		StdInWritePipe = nullptr;
+
+		// Build detailed error message for chat display
+		FString ErrorMsg = FString::Printf(
+			TEXT("Failed to start Claude process.\n\n")
+			TEXT("Windows Error %d: %s\n\n")
+			TEXT("Claude Path: %s\n")
+			TEXT("Working Dir: %s\n\n")
+			TEXT("Command (truncated): %.200s..."),
+			LastProcessError,
+			*GetWindowsErrorMessage(LastProcessError),
+			*ClaudePath,
+			*WorkingDir,
+			*FullCommand
+		);
+		ReportError(ErrorMsg);
 		return;
 	}
+
+	// Write prompt to stdin (Claude -p reads from stdin if no prompt on command line)
+	HANDLE StdInWrite = static_cast<HANDLE>(StdInWritePipe);
+	if (StdInWrite)
+	{
+		FString FullPrompt;
+
+		// Include system prompt context if present
+		if (!SystemPromptFilePath.IsEmpty())
+		{
+			FString SystemPromptContent;
+			if (FFileHelper::LoadFileToString(SystemPromptContent, *SystemPromptFilePath))
+			{
+				FullPrompt = FString::Printf(TEXT("[CONTEXT]\n%s\n[/CONTEXT]\n\n"), *SystemPromptContent);
+			}
+		}
+
+		// Add user prompt
+		if (!PromptFilePath.IsEmpty())
+		{
+			FString PromptContent;
+			if (FFileHelper::LoadFileToString(PromptContent, *PromptFilePath))
+			{
+				FullPrompt += PromptContent;
+			}
+		}
+
+		// Write combined prompt to stdin
+		if (!FullPrompt.IsEmpty())
+		{
+			FTCHARToUTF8 Utf8Prompt(*FullPrompt);
+			DWORD BytesWritten;
+			WriteFile(StdInWrite, Utf8Prompt.Get(), Utf8Prompt.Length(), &BytesWritten, NULL);
+			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote %d bytes to Claude stdin (system: %d chars, user: %d chars)"),
+				BytesWritten, CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
+		}
+
+		// Close stdin write pipe to signal EOF to Claude
+		CloseHandle(StdInWrite);
+		StdInWritePipe = nullptr;
+	}
+
+	// Clear temp file paths
+	SystemPromptFilePath.Empty();
+	PromptFilePath.Empty();
 
 	// Read output until process completes
 	FString FullOutput = ReadProcessOutput();

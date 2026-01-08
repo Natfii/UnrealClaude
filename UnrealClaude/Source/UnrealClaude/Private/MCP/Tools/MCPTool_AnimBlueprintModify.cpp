@@ -121,6 +121,11 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObjec
 	{
 		return HandleValidateBlueprint(BlueprintPath);
 	}
+	// Bulk operation for setting up multiple transition conditions
+	else if (Operation == TEXT("setup_transition_conditions"))
+	{
+		return HandleSetupTransitionConditions(BlueprintPath, Params);
+	}
 
 	return FMCPToolResult::Error(FString::Printf(TEXT("Unknown operation: %s"), *Operation));
 }
@@ -963,6 +968,59 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::HandleValidateBlueprint(const FStri
 		: FString::Printf(TEXT("Blueprint has %d error(s), %d warning(s)"),
 			static_cast<int32>(Result->GetNumberField(TEXT("error_count"))),
 			static_cast<int32>(Result->GetNumberField(TEXT("warning_count"))));
+
+	return FMCPToolResult::Success(Message, Result);
+}
+
+FMCPToolResult FMCPTool_AnimBlueprintModify::HandleSetupTransitionConditions(
+	const FString& BlueprintPath,
+	const TSharedRef<FJsonObject>& Params)
+{
+	UAnimBlueprint* AnimBP = nullptr;
+	if (auto ErrorResult = LoadAnimBlueprintOrError(BlueprintPath, AnimBP))
+	{
+		return ErrorResult.GetValue();
+	}
+
+	// Extract required parameters
+	FString StateMachineName = ExtractOptionalString(Params, TEXT("state_machine"));
+	if (StateMachineName.IsEmpty())
+	{
+		return FMCPToolResult::Error(TEXT("state_machine parameter required"));
+	}
+
+	// Get rules array
+	const TArray<TSharedPtr<FJsonValue>>* RulesArray;
+	if (!Params->TryGetArrayField(TEXT("rules"), RulesArray))
+	{
+		return FMCPToolResult::Error(TEXT("rules array required for setup_transition_conditions"));
+	}
+
+	FString Error;
+	TSharedPtr<FJsonObject> Result = FAnimationBlueprintUtils::SetupTransitionConditions(
+		AnimBP, StateMachineName, *RulesArray, Error);
+
+	if (!Result.IsValid())
+	{
+		return FMCPToolResult::Error(Error.IsEmpty() ? TEXT("Failed to setup transition conditions") : Error);
+	}
+
+	if (!Result->GetBoolField(TEXT("success")))
+	{
+		FString ErrorMsg = Result->HasField(TEXT("error"))
+			? Result->GetStringField(TEXT("error"))
+			: TEXT("Unknown error setting up transition conditions");
+		// Return partial results with error
+		return FMCPToolResult::Success(ErrorMsg, Result);
+	}
+
+	// Build success message with statistics
+	int32 RulesProcessed = static_cast<int32>(Result->GetNumberField(TEXT("rules_processed")));
+	int32 TransitionsModified = static_cast<int32>(Result->GetNumberField(TEXT("transitions_modified")));
+
+	FString Message = FString::Printf(
+		TEXT("Setup transition conditions: %d rules processed, %d transitions modified"),
+		RulesProcessed, TransitionsModified);
 
 	return FMCPToolResult::Success(Message, Result);
 }

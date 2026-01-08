@@ -1,6 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "AnimationBlueprintUtils.h"
+#include "AnimTransitionConditionFactory.h"
 #include "Animation/AnimBlueprint.h"
 #include "Animation/BlendSpace1D.h"
 #include "AnimGraphNode_StateMachine.h"
@@ -10,6 +11,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
+#include "Internationalization/Regex.h"
 
 // ===== AnimBlueprint Access (Level 1) =====
 
@@ -956,6 +958,97 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ExecuteBatchOperations(
 				);
 			}
 		}
+		else if (OpType == TEXT("add_comparison_chain"))
+		{
+			FVector2D Position(
+				Params->GetNumberField(TEXT("x")),
+				Params->GetNumberField(TEXT("y"))
+			);
+			TSharedPtr<FJsonObject> ChainResult = AddComparisonChain(
+				AnimBP,
+				Params->GetStringField(TEXT("state_machine")),
+				Params->GetStringField(TEXT("from_state")),
+				Params->GetStringField(TEXT("to_state")),
+				Params->GetStringField(TEXT("variable_name")),
+				Params->GetStringField(TEXT("comparison_type")),
+				Params->GetStringField(TEXT("compare_value")),
+				Position,
+				OpError
+			);
+			bOpSuccess = ChainResult.IsValid() && ChainResult->GetBoolField(TEXT("success"));
+			if (bOpSuccess)
+			{
+				// Include node IDs in the result
+				if (ChainResult->HasField(TEXT("variable_node_id")))
+				{
+					OpResult->SetStringField(TEXT("variable_node_id"), ChainResult->GetStringField(TEXT("variable_node_id")));
+				}
+				if (ChainResult->HasField(TEXT("comparison_node_id")))
+				{
+					OpResult->SetStringField(TEXT("comparison_node_id"), ChainResult->GetStringField(TEXT("comparison_node_id")));
+				}
+			}
+			else if (ChainResult.IsValid() && ChainResult->HasField(TEXT("error")))
+			{
+				OpError = ChainResult->GetStringField(TEXT("error"));
+			}
+		}
+		else if (OpType == TEXT("add_condition_node"))
+		{
+			FVector2D Position(
+				Params->GetNumberField(TEXT("x")),
+				Params->GetNumberField(TEXT("y"))
+			);
+			FString NodeId;
+			TSharedPtr<FJsonObject> NodeParams;
+			const TSharedPtr<FJsonObject>* NodeParamsPtr;
+			if (Params->TryGetObjectField(TEXT("node_params"), NodeParamsPtr))
+			{
+				NodeParams = *NodeParamsPtr;
+			}
+			UEdGraphNode* Node = AddConditionNode(
+				AnimBP,
+				Params->GetStringField(TEXT("state_machine")),
+				Params->GetStringField(TEXT("from_state")),
+				Params->GetStringField(TEXT("to_state")),
+				Params->GetStringField(TEXT("node_type")),
+				NodeParams,
+				Position,
+				NodeId,
+				OpError
+			);
+			bOpSuccess = (Node != nullptr);
+			if (bOpSuccess)
+			{
+				OpResult->SetStringField(TEXT("node_id"), NodeId);
+			}
+		}
+		else if (OpType == TEXT("connect_condition_nodes"))
+		{
+			bOpSuccess = ConnectConditionNodes(
+				AnimBP,
+				Params->GetStringField(TEXT("state_machine")),
+				Params->GetStringField(TEXT("from_state")),
+				Params->GetStringField(TEXT("to_state")),
+				Params->GetStringField(TEXT("source_node_id")),
+				Params->GetStringField(TEXT("source_pin")),
+				Params->GetStringField(TEXT("target_node_id")),
+				Params->GetStringField(TEXT("target_pin")),
+				OpError
+			);
+		}
+		else if (OpType == TEXT("connect_to_result"))
+		{
+			bOpSuccess = ConnectToTransitionResult(
+				AnimBP,
+				Params->GetStringField(TEXT("state_machine")),
+				Params->GetStringField(TEXT("from_state")),
+				Params->GetStringField(TEXT("to_state")),
+				Params->GetStringField(TEXT("source_node_id")),
+				Params->GetStringField(TEXT("source_pin")),
+				OpError
+			);
+		}
 		else
 		{
 			OpError = FString::Printf(TEXT("Unknown operation type: %s"), *OpType);
@@ -1299,6 +1392,436 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ValidateBlueprint(
 	Result->SetArrayField(TEXT("issues"), IssuesArray);
 	Result->SetNumberField(TEXT("error_count"), ErrorCount);
 	Result->SetNumberField(TEXT("warning_count"), WarningCount);
+
+	return Result;
+}
+
+// ===== Bulk Transition Condition Setup =====
+
+bool FAnimationBlueprintUtils::MatchesWildcard(const FString& StateName, const FString& Pattern)
+{
+	// "*" matches anything
+	if (Pattern == TEXT("*"))
+	{
+		return true;
+	}
+
+	// "Attack_*" matches "Attack_1H_1", "Attack_2H_2", etc.
+	if (Pattern.EndsWith(TEXT("*")))
+	{
+		FString Prefix = Pattern.Left(Pattern.Len() - 1);
+		return StateName.StartsWith(Prefix);
+	}
+
+	// "*_Idle" matches "Sword_Idle", "Axe_Idle", etc.
+	if (Pattern.StartsWith(TEXT("*")))
+	{
+		FString Suffix = Pattern.Right(Pattern.Len() - 1);
+		return StateName.EndsWith(Suffix);
+	}
+
+	// "*Combat*" matches "InCombatIdle", "CombatRun", etc.
+	if (Pattern.StartsWith(TEXT("*")) && Pattern.EndsWith(TEXT("*")))
+	{
+		FString Middle = Pattern.Mid(1, Pattern.Len() - 2);
+		return StateName.Contains(Middle);
+	}
+
+	// Exact match
+	return StateName.Equals(Pattern, ESearchCase::IgnoreCase);
+}
+
+bool FAnimationBlueprintUtils::MatchesRegex(const FString& StateName, const FString& Pattern)
+{
+	// Check if pattern looks like regex (starts with ^ or contains special chars)
+	bool bIsRegex = Pattern.StartsWith(TEXT("^")) || Pattern.EndsWith(TEXT("$")) ||
+		Pattern.Contains(TEXT("\\d")) || Pattern.Contains(TEXT("\\w")) ||
+		Pattern.Contains(TEXT("[")) || Pattern.Contains(TEXT("+")) ||
+		Pattern.Contains(TEXT("?")) || (Pattern.Contains(TEXT(".")) && Pattern.Contains(TEXT("*")));
+
+	if (!bIsRegex)
+	{
+		return false;
+	}
+
+	FRegexPattern RegexPattern(Pattern);
+	FRegexMatcher Matcher(RegexPattern, StateName);
+	return Matcher.FindNext();
+}
+
+bool FAnimationBlueprintUtils::MatchesPattern(const FString& StateName, const TSharedPtr<FJsonValue>& Pattern)
+{
+	if (!Pattern.IsValid())
+	{
+		return false;
+	}
+
+	// String pattern (exact, wildcard, or regex)
+	if (Pattern->Type == EJson::String)
+	{
+		FString PatternStr = Pattern->AsString();
+
+		// Try regex first (if it looks like regex)
+		if (MatchesRegex(StateName, PatternStr))
+		{
+			return true;
+		}
+
+		// Try wildcard matching
+		return MatchesWildcard(StateName, PatternStr);
+	}
+
+	// Array pattern (list of states)
+	if (Pattern->Type == EJson::Array)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& PatternList = Pattern->AsArray();
+		for (const TSharedPtr<FJsonValue>& Item : PatternList)
+		{
+			if (Item.IsValid() && Item->Type == EJson::String)
+			{
+				if (StateName.Equals(Item->AsString(), ESearchCase::IgnoreCase))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	return false;
+}
+
+TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
+	UAnimBlueprint* AnimBP,
+	const FString& StateMachineName,
+	const TArray<TSharedPtr<FJsonValue>>& Rules,
+	FString& OutError)
+{
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> ResultsArray;
+	int32 SuccessCount = 0;
+	int32 FailureCount = 0;
+	int32 MatchedTransitions = 0;
+
+	if (!ValidateAnimBlueprintForOperation(AnimBP, OutError))
+	{
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), OutError);
+		return Result;
+	}
+
+	// Get all transitions in the state machine
+	TArray<UAnimStateTransitionNode*> AllTransitions = FAnimStateMachineEditor::GetAllTransitions(
+		AnimBP, StateMachineName, OutError);
+
+	if (AllTransitions.Num() == 0)
+	{
+		OutError = FString::Printf(TEXT("No transitions found in state machine '%s'"), *StateMachineName);
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), OutError);
+		return Result;
+	}
+
+	// Process each rule
+	for (int32 RuleIndex = 0; RuleIndex < Rules.Num(); RuleIndex++)
+	{
+		const TSharedPtr<FJsonValue>& RuleValue = Rules[RuleIndex];
+		const TSharedPtr<FJsonObject>* RuleObjPtr;
+
+		if (!RuleValue->TryGetObject(RuleObjPtr) || !RuleObjPtr->IsValid())
+		{
+			TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
+			RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
+			RuleResult->SetBoolField(TEXT("success"), false);
+			RuleResult->SetStringField(TEXT("error"), TEXT("Invalid rule format"));
+			ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
+			FailureCount++;
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject>& RuleObj = *RuleObjPtr;
+
+		// Get match patterns
+		const TSharedPtr<FJsonObject>* MatchObjPtr;
+		if (!RuleObj->TryGetObjectField(TEXT("match"), MatchObjPtr) || !MatchObjPtr->IsValid())
+		{
+			TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
+			RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
+			RuleResult->SetBoolField(TEXT("success"), false);
+			RuleResult->SetStringField(TEXT("error"), TEXT("Rule missing 'match' field"));
+			ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
+			FailureCount++;
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject>& MatchObj = *MatchObjPtr;
+		TSharedPtr<FJsonValue> FromPattern = MatchObj->TryGetField(TEXT("from"));
+		TSharedPtr<FJsonValue> ToPattern = MatchObj->TryGetField(TEXT("to"));
+
+		if (!FromPattern.IsValid() || !ToPattern.IsValid())
+		{
+			TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
+			RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
+			RuleResult->SetBoolField(TEXT("success"), false);
+			RuleResult->SetStringField(TEXT("error"), TEXT("Rule match missing 'from' or 'to' patterns"));
+			ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
+			FailureCount++;
+			continue;
+		}
+
+		// Get conditions
+		const TArray<TSharedPtr<FJsonValue>>* ConditionsPtr;
+		if (!RuleObj->TryGetArrayField(TEXT("conditions"), ConditionsPtr) || !ConditionsPtr)
+		{
+			TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
+			RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
+			RuleResult->SetBoolField(TEXT("success"), false);
+			RuleResult->SetStringField(TEXT("error"), TEXT("Rule missing 'conditions' array"));
+			ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
+			FailureCount++;
+			continue;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>& Conditions = *ConditionsPtr;
+		FString Logic = RuleObj->GetStringField(TEXT("logic"));
+		if (Logic.IsEmpty()) Logic = TEXT("AND");
+
+		// Track matched transitions for this rule
+		TArray<TSharedPtr<FJsonValue>> RuleMatchedTransitions;
+
+		// Find matching transitions
+		for (UAnimStateTransitionNode* Transition : AllTransitions)
+		{
+			if (!Transition) continue;
+
+			UAnimStateNodeBase* PrevState = Transition->GetPreviousState();
+			UAnimStateNodeBase* NextState = Transition->GetNextState();
+
+			if (!PrevState || !NextState) continue;
+
+			FString FromStateName = PrevState->GetStateName();
+			FString ToStateName = NextState->GetStateName();
+
+			// Check if this transition matches the pattern
+			bool bFromMatches = MatchesPattern(FromStateName, FromPattern);
+			bool bToMatches = MatchesPattern(ToStateName, ToPattern);
+
+			if (!bFromMatches || !bToMatches) continue;
+
+			MatchedTransitions++;
+
+			// Apply conditions to this transition
+			TSharedPtr<FJsonObject> TransitionResult = MakeShared<FJsonObject>();
+			TransitionResult->SetStringField(TEXT("from_state"), FromStateName);
+			TransitionResult->SetStringField(TEXT("to_state"), ToStateName);
+
+			FString ConditionError;
+			bool bConditionSuccess = true;
+			TArray<TSharedPtr<FJsonValue>> AppliedConditions;
+
+			// Get transition graph
+			UEdGraph* TransitionGraph = GetTransitionGraph(AnimBP, StateMachineName, FromStateName, ToStateName, ConditionError);
+			if (!TransitionGraph)
+			{
+				TransitionResult->SetBoolField(TEXT("success"), false);
+				TransitionResult->SetStringField(TEXT("error"), ConditionError);
+				RuleMatchedTransitions.Add(MakeShared<FJsonValueObject>(TransitionResult));
+				FailureCount++;
+				continue;
+			}
+
+			// Track node IDs for connecting with logic operators
+			TArray<FString> ConditionNodeIds;
+			int32 PosX = 100;
+			int32 PosY = 100;
+
+			// Apply each condition
+			for (const TSharedPtr<FJsonValue>& CondValue : Conditions)
+			{
+				const TSharedPtr<FJsonObject>* CondObjPtr;
+				if (!CondValue->TryGetObject(CondObjPtr) || !CondObjPtr->IsValid()) continue;
+
+				const TSharedPtr<FJsonObject>& CondObj = *CondObjPtr;
+				TSharedPtr<FJsonObject> CondResult = MakeShared<FJsonObject>();
+
+				FString CondType = CondObj->GetStringField(TEXT("type"));
+				FString Variable = CondObj->GetStringField(TEXT("variable"));
+				FString Comparison = CondObj->GetStringField(TEXT("comparison"));
+				FString Value = CondObj->GetStringField(TEXT("value"));
+
+				// Handle TimeRemaining condition
+				if (CondType.Equals(TEXT("TimeRemaining"), ESearchCase::IgnoreCase))
+				{
+					FString NodeError;
+					FString TimeNodeId;
+
+					// Create TimeRemaining node
+					UEdGraphNode* TimeNode = AddConditionNode(
+						AnimBP, StateMachineName, FromStateName, ToStateName,
+						TEXT("TimeRemaining"), nullptr, FVector2D(PosX, PosY),
+						TimeNodeId, NodeError);
+
+					if (!TimeNode)
+					{
+						CondResult->SetBoolField(TEXT("success"), false);
+						CondResult->SetStringField(TEXT("error"), NodeError);
+						bConditionSuccess = false;
+					}
+					else
+					{
+						// Create comparison node
+						FString CompNodeId;
+						UEdGraphNode* CompNode = AddConditionNode(
+							AnimBP, StateMachineName, FromStateName, ToStateName,
+							Comparison, nullptr, FVector2D(PosX + 200, PosY),
+							CompNodeId, NodeError);
+
+						if (CompNode)
+						{
+							// Connect TimeRemaining to comparison A
+							ConnectConditionNodes(
+								AnimBP, StateMachineName, FromStateName, ToStateName,
+								TimeNodeId, TEXT("ReturnValue"),
+								CompNodeId, TEXT("A"),
+								NodeError);
+
+							// Set comparison value on B
+							SetPinDefaultValue(AnimBP, StateMachineName, FromStateName, ToStateName,
+								CompNodeId, TEXT("B"), Value, NodeError);
+
+							ConditionNodeIds.Add(CompNodeId);
+							CondResult->SetBoolField(TEXT("success"), true);
+							CondResult->SetStringField(TEXT("time_node_id"), TimeNodeId);
+							CondResult->SetStringField(TEXT("comparison_node_id"), CompNodeId);
+						}
+						else
+						{
+							CondResult->SetBoolField(TEXT("success"), false);
+							CondResult->SetStringField(TEXT("error"), NodeError);
+							bConditionSuccess = false;
+						}
+					}
+					CondResult->SetStringField(TEXT("type"), TEXT("TimeRemaining"));
+				}
+				// Handle variable comparison condition
+				else if (!Variable.IsEmpty())
+				{
+					FString ChainError;
+					TSharedPtr<FJsonObject> ChainResult = FAnimTransitionConditionFactory::CreateComparisonChain(
+						AnimBP, TransitionGraph, Variable, Comparison, Value,
+						FVector2D(PosX, PosY), ChainError);
+
+					if (ChainResult.IsValid() && ChainResult->GetBoolField(TEXT("success")))
+					{
+						FString CompNodeId = ChainResult->GetStringField(TEXT("comparison_node_id"));
+						ConditionNodeIds.Add(CompNodeId);
+						CondResult->SetBoolField(TEXT("success"), true);
+						CondResult->SetStringField(TEXT("variable"), Variable);
+						CondResult->SetStringField(TEXT("comparison"), Comparison);
+						CondResult->SetStringField(TEXT("value"), Value);
+						CondResult->SetStringField(TEXT("comparison_node_id"), CompNodeId);
+					}
+					else
+					{
+						CondResult->SetBoolField(TEXT("success"), false);
+						CondResult->SetStringField(TEXT("error"), ChainError);
+						bConditionSuccess = false;
+					}
+				}
+				else
+				{
+					CondResult->SetBoolField(TEXT("success"), false);
+					CondResult->SetStringField(TEXT("error"), TEXT("Condition must have 'type' or 'variable'"));
+					bConditionSuccess = false;
+				}
+
+				AppliedConditions.Add(MakeShared<FJsonValueObject>(CondResult));
+				PosY += 150;
+			}
+
+			// If multiple conditions and using OR logic, we need to connect with OR nodes
+			// (AND logic is handled automatically by CreateComparisonChain)
+			if (ConditionNodeIds.Num() > 1 && Logic.Equals(TEXT("OR"), ESearchCase::IgnoreCase))
+			{
+				// Create OR chain
+				FString OrError;
+				FString PreviousNodeId = ConditionNodeIds[0];
+
+				for (int32 i = 1; i < ConditionNodeIds.Num(); i++)
+				{
+					FString OrNodeId;
+					UEdGraphNode* OrNode = AddConditionNode(
+						AnimBP, StateMachineName, FromStateName, ToStateName,
+						TEXT("Or"), nullptr, FVector2D(PosX + 400, 100 + (i * 100)),
+						OrNodeId, OrError);
+
+					if (OrNode)
+					{
+						// Connect previous result to OR input A
+						ConnectConditionNodes(
+							AnimBP, StateMachineName, FromStateName, ToStateName,
+							PreviousNodeId, TEXT("ReturnValue"),
+							OrNodeId, TEXT("A"),
+							OrError);
+
+						// Connect current condition to OR input B
+						ConnectConditionNodes(
+							AnimBP, StateMachineName, FromStateName, ToStateName,
+							ConditionNodeIds[i], TEXT("ReturnValue"),
+							OrNodeId, TEXT("B"),
+							OrError);
+
+						PreviousNodeId = OrNodeId;
+					}
+				}
+
+				// Connect final OR output to result
+				if (!PreviousNodeId.IsEmpty())
+				{
+					ConnectToTransitionResult(
+						AnimBP, StateMachineName, FromStateName, ToStateName,
+						PreviousNodeId, TEXT("ReturnValue"), OrError);
+				}
+			}
+
+			TransitionResult->SetBoolField(TEXT("success"), bConditionSuccess);
+			TransitionResult->SetArrayField(TEXT("conditions"), AppliedConditions);
+			RuleMatchedTransitions.Add(MakeShared<FJsonValueObject>(TransitionResult));
+
+			if (bConditionSuccess)
+			{
+				SuccessCount++;
+			}
+			else
+			{
+				FailureCount++;
+			}
+		}
+
+		// Add rule result
+		TSharedPtr<FJsonObject> RuleResult = MakeShared<FJsonObject>();
+		RuleResult->SetNumberField(TEXT("rule_index"), RuleIndex);
+		RuleResult->SetNumberField(TEXT("matched_count"), RuleMatchedTransitions.Num());
+		RuleResult->SetArrayField(TEXT("transitions"), RuleMatchedTransitions);
+		ResultsArray.Add(MakeShared<FJsonValueObject>(RuleResult));
+	}
+
+	// Compile once after all operations
+	FString CompileError;
+	bool bCompiled = CompileAnimBlueprint(AnimBP, CompileError);
+
+	Result->SetBoolField(TEXT("success"), FailureCount == 0 && bCompiled);
+	Result->SetNumberField(TEXT("total_transitions_in_machine"), AllTransitions.Num());
+	Result->SetNumberField(TEXT("matched_transitions"), MatchedTransitions);
+	Result->SetNumberField(TEXT("success_count"), SuccessCount);
+	Result->SetNumberField(TEXT("failure_count"), FailureCount);
+	Result->SetNumberField(TEXT("rules_processed"), Rules.Num());
+	Result->SetBoolField(TEXT("compiled"), bCompiled);
+	if (!bCompiled)
+	{
+		Result->SetStringField(TEXT("compile_error"), CompileError);
+	}
+	Result->SetArrayField(TEXT("results"), ResultsArray);
 
 	return Result;
 }
