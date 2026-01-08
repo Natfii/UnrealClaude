@@ -83,7 +83,9 @@ public:
 			"- 'set_pin_default_value': Set pin value with type validation\n"
 			"- 'add_comparison_chain': Add GetVariable->Comparison->Result (auto-ANDs with existing)\n"
 			"- 'validate_blueprint': Return compile errors with full diagnostics\n\n"
-			"Bulk Operations (NEW):\n"
+			"Visualization (NEW):\n"
+			"- 'get_state_machine_diagram': Generate ASCII diagram and enhanced JSON for state machine\n\n"
+			"Bulk Operations:\n"
 			"- 'setup_transition_conditions': Setup conditions for multiple transitions using pattern matching\n\n"
 			"AnimGraph Connection:\n"
 			"- 'connect_state_machine_to_output': Connect State Machine to AnimGraph Output Pose\n\n"
@@ -94,7 +96,7 @@ public:
 		);
 		Info.Parameters = {
 			FMCPToolParameter(TEXT("blueprint_path"), TEXT("string"), TEXT("Path to the Animation Blueprint (e.g., '/Game/Characters/ABP_Character')"), true),
-			FMCPToolParameter(TEXT("operation"), TEXT("string"), TEXT("Operation: get_info, get_state_machine, create_state_machine, add_state, remove_state, set_entry_state, add_transition, remove_transition, set_transition_duration, set_transition_priority, add_condition_node, delete_condition_node, connect_condition_nodes, connect_to_result, connect_state_machine_to_output, set_state_animation, find_animations, batch, get_transition_nodes, inspect_node_pins, set_pin_default_value, add_comparison_chain, validate_blueprint"), true),
+			FMCPToolParameter(TEXT("operation"), TEXT("string"), TEXT("Operation: get_info, get_state_machine, get_state_machine_diagram, create_state_machine, add_state, remove_state, set_entry_state, add_transition, remove_transition, set_transition_duration, set_transition_priority, add_condition_node, delete_condition_node, connect_condition_nodes, connect_to_result, connect_state_machine_to_output, set_state_animation, find_animations, batch, get_transition_nodes, inspect_node_pins, set_pin_default_value, add_comparison_chain, validate_blueprint"), true),
 			FMCPToolParameter(TEXT("state_machine"), TEXT("string"), TEXT("State machine name (for state/transition operations)"), false),
 			FMCPToolParameter(TEXT("state_name"), TEXT("string"), TEXT("State name (for state operations)"), false),
 			FMCPToolParameter(TEXT("from_state"), TEXT("string"), TEXT("Source state name (for transitions)"), false),
@@ -158,6 +160,7 @@ private:
 	FMCPToolResult HandleSetPinDefaultValue(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleAddComparisonChain(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult HandleValidateBlueprint(const FString& BlueprintPath);
+	FMCPToolResult HandleGetStateMachineDiagram(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);
 
 	// Bulk operation handler
 	FMCPToolResult HandleSetupTransitionConditions(const FString& BlueprintPath, const TSharedRef<FJsonObject>& Params);

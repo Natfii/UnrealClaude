@@ -121,6 +121,10 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::Execute(const TSharedRef<FJsonObjec
 	{
 		return HandleValidateBlueprint(BlueprintPath);
 	}
+	else if (Operation == TEXT("get_state_machine_diagram"))
+	{
+		return HandleGetStateMachineDiagram(BlueprintPath, Params);
+	}
 	// Bulk operation for setting up multiple transition conditions
 	else if (Operation == TEXT("setup_transition_conditions"))
 	{
@@ -970,6 +974,35 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::HandleValidateBlueprint(const FStri
 			static_cast<int32>(Result->GetNumberField(TEXT("warning_count"))));
 
 	return FMCPToolResult::Success(Message, Result);
+}
+
+FMCPToolResult FMCPTool_AnimBlueprintModify::HandleGetStateMachineDiagram(
+	const FString& BlueprintPath,
+	const TSharedRef<FJsonObject>& Params)
+{
+	UAnimBlueprint* AnimBP = nullptr;
+	if (auto ErrorResult = LoadAnimBlueprintOrError(BlueprintPath, AnimBP))
+	{
+		return ErrorResult.GetValue();
+	}
+
+	FString StateMachineName = Params->GetStringField(TEXT("state_machine"));
+	if (StateMachineName.IsEmpty())
+	{
+		return FMCPToolResult::Error(TEXT("state_machine parameter required"));
+	}
+
+	FString Error;
+	TSharedPtr<FJsonObject> Result = FAnimationBlueprintUtils::GetStateMachineDiagram(AnimBP, StateMachineName, Error);
+
+	if (!Result.IsValid() || !Result->GetBoolField(TEXT("success")))
+	{
+		return FMCPToolResult::Error(Error.IsEmpty() ? TEXT("Failed to generate diagram") : Error);
+	}
+
+	// Return ASCII diagram in message for easy viewing, with full JSON data
+	FString AsciiDiagram = Result->GetStringField(TEXT("ascii_diagram"));
+	return FMCPToolResult::Success(AsciiDiagram, Result);
 }
 
 FMCPToolResult FMCPTool_AnimBlueprintModify::HandleSetupTransitionConditions(

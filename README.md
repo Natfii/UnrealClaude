@@ -242,11 +242,17 @@ Use `operation: "batch"` with an `operations` array to execute multiple operatio
 - `find_animations` - Search for compatible animation assets
 - `connect_state_machine_to_output` - Connect State Machine to AnimGraph Output Pose
 
-**Introspection:**
+**Introspection & Visualization:**
 - `get_transition_nodes` - List all nodes in transition graph(s) with pins
 - `inspect_node_pins` - Get detailed pin info for a node
 - `set_pin_default_value` - Set pin default value with type validation
 - `validate_blueprint` - Return compile errors with full diagnostics
+- `get_state_machine_diagram` - Generate ASCII diagram and enhanced JSON for state machine visualization
+
+**Smart Pin Type Detection:**
+- When connecting pins, the system automatically detects type mismatches (e.g., integer variable → float comparison)
+- Comparison nodes are automatically recreated with the correct type (Integer, Float, Boolean, Byte, Enum)
+- No manual type specification needed - the system infers from connected variable types
 
 All modifications auto-compile the Animation Blueprint after changes and return structured compile results with error details for easy debugging.
 

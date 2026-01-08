@@ -161,6 +161,58 @@ bool FAnimTransitionConditionFactory::ConnectTransitionNodes(
 		return false;
 	}
 
+	// ===== Smart Type Detection and Auto-Fix =====
+	// Check if target node is a comparison node and if there's a type mismatch
+	FString TargetComparisonType;
+	EComparisonPinType TargetPinType;
+
+	if (IsComparisonNode(TargetNode, TargetComparisonType, TargetPinType))
+	{
+		// Detect source pin type
+		EComparisonPinType SourcePinType = DetectComparisonTypeFromPin(SourcePin);
+
+		// Check for type mismatch (ignoring Float since it's the default and may be intentional)
+		// We fix cases where: Int -> Float, Byte -> Float, Bool -> Float, Enum -> Float
+		bool bTypeMismatch = (SourcePinType != TargetPinType);
+
+		// Don't "fix" if source is Float and target is already Float (normal case)
+		// Only fix when source is a specific type (Int, Bool, Byte, Enum) and target doesn't match
+		if (bTypeMismatch && SourcePinType != EComparisonPinType::Float)
+		{
+			// Recreate comparison node with correct type
+			FString RecreateError;
+			UEdGraphNode* NewTargetNode = RecreateComparisonNodeWithType(
+				TransitionGraph, TargetNode, TargetComparisonType, SourcePinType, RecreateError);
+
+			if (NewTargetNode)
+			{
+				// Update target node reference and find new target pin
+				TargetNode = NewTargetNode;
+				TargetPin = FAnimNodePinUtils::FindPinByName(TargetNode, TargetPinName, EGPD_Input);
+				if (!TargetPin)
+				{
+					// Try pin A as fallback
+					TargetPin = FAnimNodePinUtils::FindPinByName(TargetNode, TEXT("A"), EGPD_Input);
+				}
+
+				if (!TargetPin)
+				{
+					OutError = TEXT("Failed to find target pin after recreating comparison node");
+					return false;
+				}
+
+				UE_LOG(LogTemp, Log, TEXT("Auto-fixed comparison node type mismatch: %s -> %s"),
+					*FString::Printf(TEXT("%d"), (int32)TargetPinType),
+					*FString::Printf(TEXT("%d"), (int32)SourcePinType));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Failed to auto-fix comparison node type: %s"), *RecreateError);
+				// Continue with connection anyway - let it fail naturally if incompatible
+			}
+		}
+	}
+
 	// Make connection
 	SourcePin->MakeLinkTo(TargetPin);
 	TransitionGraph->Modify();
@@ -715,4 +767,281 @@ UEdGraphNode* FAnimTransitionConditionFactory::CreateVariableGetNode(
 	VarNode->ReconstructNode();
 
 	return VarNode;
+}
+
+// ===== Pin Type Auto-Detection Helpers =====
+
+EComparisonPinType FAnimTransitionConditionFactory::DetectComparisonTypeFromPin(const UEdGraphPin* Pin)
+{
+	if (!Pin)
+	{
+		return EComparisonPinType::Float; // Default
+	}
+
+	const FName& Category = Pin->PinType.PinCategory;
+
+	if (Category == UEdGraphSchema_K2::PC_Boolean)
+	{
+		return EComparisonPinType::Boolean;
+	}
+	else if (Category == UEdGraphSchema_K2::PC_Int)
+	{
+		return EComparisonPinType::Integer;
+	}
+	else if (Category == UEdGraphSchema_K2::PC_Byte)
+	{
+		// Check if it's an enum (has PinSubCategoryObject)
+		if (Pin->PinType.PinSubCategoryObject.IsValid())
+		{
+			return EComparisonPinType::Enum;
+		}
+		return EComparisonPinType::Byte;
+	}
+	else if (Category == UEdGraphSchema_K2::PC_Enum)
+	{
+		return EComparisonPinType::Enum;
+	}
+
+	// Float/Double/Real are all handled as Float
+	return EComparisonPinType::Float;
+}
+
+bool FAnimTransitionConditionFactory::IsComparisonNode(
+	const UEdGraphNode* Node,
+	FString& OutComparisonType,
+	EComparisonPinType& OutPinType)
+{
+	const UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+	if (!CallNode)
+	{
+		return false;
+	}
+
+	// Get the function name
+	FName FunctionName = CallNode->FunctionReference.GetMemberName();
+	FString FuncStr = FunctionName.ToString();
+
+	// Map function names to comparison types and pin types
+	// Float/Double comparisons
+	if (FuncStr == TEXT("Greater_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("Greater");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	else if (FuncStr == TEXT("Less_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("Less");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	else if (FuncStr == TEXT("GreaterEqual_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("GreaterEqual");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	else if (FuncStr == TEXT("LessEqual_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("LessEqual");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	else if (FuncStr == TEXT("EqualEqual_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("Equal");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	else if (FuncStr == TEXT("NotEqual_DoubleDouble"))
+	{
+		OutComparisonType = TEXT("NotEqual");
+		OutPinType = EComparisonPinType::Float;
+		return true;
+	}
+	// Integer comparisons
+	else if (FuncStr == TEXT("Greater_IntInt"))
+	{
+		OutComparisonType = TEXT("Greater");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	else if (FuncStr == TEXT("Less_IntInt"))
+	{
+		OutComparisonType = TEXT("Less");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	else if (FuncStr == TEXT("GreaterEqual_IntInt"))
+	{
+		OutComparisonType = TEXT("GreaterEqual");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	else if (FuncStr == TEXT("LessEqual_IntInt"))
+	{
+		OutComparisonType = TEXT("LessEqual");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	else if (FuncStr == TEXT("EqualEqual_IntInt"))
+	{
+		OutComparisonType = TEXT("Equal");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	else if (FuncStr == TEXT("NotEqual_IntInt"))
+	{
+		OutComparisonType = TEXT("NotEqual");
+		OutPinType = EComparisonPinType::Integer;
+		return true;
+	}
+	// Byte/Enum comparisons
+	else if (FuncStr == TEXT("Greater_ByteByte"))
+	{
+		OutComparisonType = TEXT("Greater");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	else if (FuncStr == TEXT("Less_ByteByte"))
+	{
+		OutComparisonType = TEXT("Less");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	else if (FuncStr == TEXT("GreaterEqual_ByteByte"))
+	{
+		OutComparisonType = TEXT("GreaterEqual");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	else if (FuncStr == TEXT("LessEqual_ByteByte"))
+	{
+		OutComparisonType = TEXT("LessEqual");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	else if (FuncStr == TEXT("EqualEqual_ByteByte"))
+	{
+		OutComparisonType = TEXT("Equal");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	else if (FuncStr == TEXT("NotEqual_ByteByte"))
+	{
+		OutComparisonType = TEXT("NotEqual");
+		OutPinType = EComparisonPinType::Byte;
+		return true;
+	}
+	// Boolean comparisons
+	else if (FuncStr == TEXT("EqualEqual_BoolBool"))
+	{
+		OutComparisonType = TEXT("Equal");
+		OutPinType = EComparisonPinType::Boolean;
+		return true;
+	}
+	else if (FuncStr == TEXT("NotEqual_BoolBool"))
+	{
+		OutComparisonType = TEXT("NotEqual");
+		OutPinType = EComparisonPinType::Boolean;
+		return true;
+	}
+
+	return false;
+}
+
+UEdGraphNode* FAnimTransitionConditionFactory::RecreateComparisonNodeWithType(
+	UEdGraph* Graph,
+	UEdGraphNode* ExistingNode,
+	const FString& ComparisonType,
+	EComparisonPinType NewPinType,
+	FString& OutError)
+{
+	if (!Graph || !ExistingNode)
+	{
+		OutError = TEXT("Invalid graph or existing node");
+		return nullptr;
+	}
+
+	// Store the existing node's position and ID
+	int32 PosX = ExistingNode->NodePosX;
+	int32 PosY = ExistingNode->NodePosY;
+
+	// Get existing node ID if it has one
+	FString ExistingNodeId;
+	if (ExistingNode->NodeComment.StartsWith(TEXT("NodeId:")))
+	{
+		ExistingNodeId = ExistingNode->NodeComment.Mid(7);
+	}
+
+	// Store existing connections to pin B (the value input) if any
+	FString PinBDefaultValue;
+	UEdGraphPin* OldPinB = FAnimNodePinUtils::FindPinByName(ExistingNode, TEXT("B"), EGPD_Input);
+	if (OldPinB)
+	{
+		PinBDefaultValue = OldPinB->DefaultValue;
+	}
+
+	// Store connections to output pin
+	TArray<UEdGraphPin*> OutputConnections;
+	UEdGraphPin* OldOutput = FAnimNodePinUtils::FindPinByName(ExistingNode, TEXT("ReturnValue"), EGPD_Output);
+	if (OldOutput)
+	{
+		OutputConnections = OldOutput->LinkedTo;
+	}
+
+	// Remove the old node from graph (break links first)
+	ExistingNode->BreakAllNodeLinks();
+	Graph->RemoveNode(ExistingNode);
+
+	// Create new comparison node with correct type
+	bool bIsBooleanType = (NewPinType == EComparisonPinType::Boolean);
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	UEdGraphNode* NewNode = CreateComparisonNode(
+		Graph, ComparisonType, Params, FVector2D(PosX, PosY), OutError, bIsBooleanType, NewPinType);
+
+	if (!NewNode)
+	{
+		return nullptr;
+	}
+
+	// Restore node ID
+	if (!ExistingNodeId.IsEmpty())
+	{
+		FAnimGraphEditor::SetNodeId(NewNode, ExistingNodeId);
+	}
+
+	// Restore pin B default value
+	if (!PinBDefaultValue.IsEmpty())
+	{
+		UEdGraphPin* NewPinB = FAnimNodePinUtils::FindPinByName(NewNode, TEXT("B"), EGPD_Input);
+		if (NewPinB)
+		{
+			const UEdGraphSchema* Schema = Graph->GetSchema();
+			if (Schema)
+			{
+				Schema->TrySetDefaultValue(*NewPinB, PinBDefaultValue);
+			}
+			else
+			{
+				NewPinB->DefaultValue = PinBDefaultValue;
+			}
+		}
+	}
+
+	// Restore output connections
+	UEdGraphPin* NewOutput = FAnimNodePinUtils::FindPinByName(NewNode, TEXT("ReturnValue"), EGPD_Output);
+	if (NewOutput)
+	{
+		for (UEdGraphPin* ConnectedPin : OutputConnections)
+		{
+			if (ConnectedPin)
+			{
+				NewOutput->MakeLinkTo(ConnectedPin);
+			}
+		}
+	}
+
+	Graph->Modify();
+	return NewNode;
 }

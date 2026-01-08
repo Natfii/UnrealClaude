@@ -29,9 +29,14 @@
  * @Created: 2026-01-03T10:30:00Z
  * """
  */
+class FMCPTaskQueue;
+
 class FMCPTool_ExecuteScript : public FMCPToolBase
 {
 public:
+	/** Set the task queue for async execution */
+	void SetTaskQueue(TSharedPtr<FMCPTaskQueue> InTaskQueue) { TaskQueue = InTaskQueue; }
+
 	virtual FMCPToolInfo GetInfo() const override
 	{
 		FMCPToolInfo Info;
@@ -75,4 +80,11 @@ public:
 	}
 
 	virtual FMCPToolResult Execute(const TSharedRef<FJsonObject>& Params) override;
+
+private:
+	/** Task queue for async execution */
+	TSharedPtr<FMCPTaskQueue> TaskQueue;
+
+	/** Execute script synchronously (called by task queue) */
+	FMCPToolResult ExecuteSync(const TSharedRef<FJsonObject>& Params);
 };

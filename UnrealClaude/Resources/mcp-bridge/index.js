@@ -9,6 +9,7 @@
  * Environment Variables:
  *   UNREAL_MCP_URL - Base URL for Unreal MCP server (default: http://localhost:3000)
  *   MCP_REQUEST_TIMEOUT_MS - HTTP request timeout in milliseconds (default: 30000)
+ *   INJECT_CONTEXT - Enable automatic context injection on tool calls (default: false)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -18,10 +19,20 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+// Dynamic context loader for UE 5.7 API documentation
+import {
+  getContextForTool,
+  getContextForQuery,
+  listCategories,
+  getCategoryInfo,
+  loadContextForCategory,
+} from "./context-loader.js";
+
 // Configuration with defaults
 const CONFIG = {
   unrealMcpUrl: process.env.UNREAL_MCP_URL || "http://localhost:3000",
   requestTimeoutMs: parseInt(process.env.MCP_REQUEST_TIMEOUT_MS, 10) || 30000,
+  injectContext: process.env.INJECT_CONTEXT === "true", // Auto-inject context on tool responses
 };
 
 /**
@@ -177,7 +188,7 @@ function convertAnnotations(unrealAnnotations) {
 const server = new Server(
   {
     name: "unrealclaude",
-    version: "1.1.0",
+    version: "1.2.0",
   },
   {
     capabilities: {
@@ -239,6 +250,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
   });
 
+  // Add UE context tool for querying API documentation
+  mcpTools.push({
+    name: "unreal_get_ue_context",
+    description: `Get Unreal Engine 5.7 API context/documentation. Use when you need UE5 API patterns, examples, or best practices. Categories: ${listCategories().join(", ")}. Can also search by query keywords.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          description: `Specific category to load: ${listCategories().join(", ")}`,
+        },
+        query: {
+          type: "string",
+          description: "Search query to find relevant context (e.g., 'state machine transitions', 'async loading')",
+        },
+      },
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  });
+
   log.info("Tools listed", { count: mcpTools.length, connected: true });
   return { tools: mcpTools };
 });
@@ -246,6 +282,78 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // Handle call_tool request
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Handle UE context request
+  if (name === "unreal_get_ue_context") {
+    const { category, query } = args || {};
+
+    let result = null;
+    let matchedCategories = [];
+
+    // If specific category requested
+    if (category) {
+      const content = loadContextForCategory(category);
+      if (content) {
+        result = content;
+        matchedCategories = [category];
+      } else {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unknown category: ${category}. Available categories: ${listCategories().join(", ")}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+    // If query provided, search by keywords
+    else if (query) {
+      const queryResult = getContextForQuery(query);
+      if (queryResult) {
+        result = queryResult.content;
+        matchedCategories = queryResult.categories;
+      } else {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No context found for query: "${query}". Try categories: ${listCategories().join(", ")}`,
+            },
+          ],
+          isError: false,
+        };
+      }
+    }
+    // No params - list available categories
+    else {
+      const categoryList = listCategories().map((cat) => {
+        const info = getCategoryInfo(cat);
+        return `- **${cat}**: Keywords: ${info.keywords.slice(0, 5).join(", ")}...`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Available UE 5.7 Context Categories\n\n${categoryList.join("\n")}\n\nUse \`category\` param for specific context or \`query\` to search by keywords.`,
+          },
+        ],
+      };
+    }
+
+    log.info("UE context loaded", { categories: matchedCategories });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `# UE 5.7 Context: ${matchedCategories.join(", ")}\n\n${result}`,
+        },
+      ],
+    };
+  }
 
   // Handle status check
   if (name === "unreal_status") {
@@ -273,11 +381,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      // Check context system status
+      const contextCategories = listCategories();
+      const testContext = loadContextForCategory("animation");
+      const contextStatus = testContext
+        ? `OK (${contextCategories.length} categories: ${contextCategories.join(", ")})`
+        : "FAILED - context files not loading";
+
       // Build response - only include broken tools if there are any
       const response = {
         connected: true,
         project: status.projectName,
         engine: status.engineVersion,
+        context_system: contextStatus,
         tool_summary: categories,
         total_tools: unrealTools.length,
         message: "Unreal Editor connected. All tools operational.",
@@ -329,14 +445,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const toolName = name.substring(7); // Remove "unreal_" prefix
   const result = await executeUnrealTool(toolName, args);
 
+  // Build response text
+  let responseText = result.success
+    ? result.message + (result.data ? "\n\n" + JSON.stringify(result.data, null, 2) : "")
+    : `Error: ${result.message}`;
+
+  // Optionally inject relevant UE context based on tool name
+  if (CONFIG.injectContext && result.success) {
+    const context = getContextForTool(toolName);
+    if (context) {
+      responseText += `\n\n---\n\n## Relevant UE 5.7 API Context\n\n${context}`;
+      log.debug("Injected context for tool", { tool: toolName });
+    }
+  }
+
   // Build response with both text content and structured data
   const response = {
     content: [
       {
         type: "text",
-        text: result.success
-          ? result.message + (result.data ? "\n\n" + JSON.stringify(result.data, null, 2) : "")
-          : `Error: ${result.message}`,
+        text: responseText,
       },
     ],
     isError: !result.success,
@@ -358,10 +486,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Verify context system is working
+  const categories = listCategories();
+  const testContext = loadContextForCategory("animation");
+  const contextStatus = testContext ? `OK (${categories.length} categories loaded)` : "FAILED";
+
   log.info("UnrealClaude MCP Bridge started", {
-    version: "1.1.0",
+    version: "1.2.0",
     unrealUrl: CONFIG.unrealMcpUrl,
-    timeoutMs: CONFIG.requestTimeoutMs
+    timeoutMs: CONFIG.requestTimeoutMs,
+    contextInjection: CONFIG.injectContext,
+    contextSystem: contextStatus,
+    contextCategories: categories,
   });
 }
 

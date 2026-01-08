@@ -37,11 +37,12 @@ The plugin must be running for the MCP bridge to work. When Unreal Editor starts
 
 ## Available Tools
 
-### Connection Status
+### Connection & Context Tools
 
 | Tool | Description |
 |------|-------------|
 | `unreal_status` | Check connection to Unreal Editor |
+| `unreal_get_ue_context` | Get UE 5.7 API documentation by category or query |
 
 ### Level & Actor Tools
 
@@ -285,3 +286,62 @@ The `unreal_anim_blueprint_modify` tool provides full control over Animation Blu
 - Ensure Node.js is installed and in PATH
 - Verify all dependencies are installed (`npm install`)
 - Check that the path in settings.json points to the correct index.js location
+
+---
+
+## Dynamic UE 5.7 Context System
+
+The bridge includes a dynamic context loader that provides accurate UE 5.7 API documentation on demand.
+
+### Available Context Categories
+
+| Category | Description |
+|----------|-------------|
+| `animation` | Animation Blueprint, state machines, transitions, UAnimInstance |
+| `blueprint` | Blueprint graphs, UK2Node, FBlueprintEditorUtils |
+| `slate` | Slate UI widgets, SNew/SAssignNew, layout patterns |
+| `actor` | Actor spawning, components, transforms, iteration |
+| `assets` | Asset loading, TSoftObjectPtr, FStreamableManager, async loading |
+| `replication` | Network replication, RPCs, DOREPLIFETIME, OnRep |
+
+### Using the Context Tool
+
+**Get specific category:**
+```json
+{
+  "category": "animation"
+}
+```
+
+**Search by query:**
+```json
+{
+  "query": "state machine transitions"
+}
+```
+
+**List available categories:**
+```json
+{}
+```
+
+### Automatic Context Injection
+
+Enable automatic context injection by setting the environment variable:
+
+```json
+{
+  "mcpServers": {
+    "unrealclaude": {
+      "command": "node",
+      "args": ["/path/to/mcp-bridge/index.js"],
+      "env": {
+        "UNREAL_MCP_URL": "http://localhost:3000",
+        "INJECT_CONTEXT": "true"
+      }
+    }
+  }
+}
+```
+
+When enabled, relevant UE 5.7 context will be automatically appended to tool responses based on the tool being used.

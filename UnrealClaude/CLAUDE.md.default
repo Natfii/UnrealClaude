@@ -112,6 +112,43 @@ Info.Annotations = FMCPToolAnnotations::Destructive();
 
 ---
 
+## Dynamic UE 5.7 Context System
+
+The MCP bridge includes dynamic context files that provide accurate UE 5.7 API documentation.
+
+### Context Files Location
+```
+Resources/mcp-bridge/contexts/
+├── animation.md   # Animation Blueprint, state machines, UAnimInstance
+├── blueprint.md   # Blueprint graphs, UK2Node, FBlueprintEditorUtils
+├── slate.md       # Slate UI widgets, SNew/SAssignNew patterns
+├── actor.md       # Actor spawning, components, transforms
+├── assets.md      # Asset loading, TSoftObjectPtr, async loading
+└── replication.md # Network replication, RPCs, DOREPLIFETIME
+```
+
+### Maintaining Context Files
+
+**IMPORTANT**: When adding new MCP tools or discovering UE 5.7 API changes:
+
+1. **Update relevant context file** in `Resources/mcp-bridge/contexts/`
+2. **Verify accuracy** via web search or official UE 5.7 documentation
+3. **Add tool patterns** to `context-loader.js` if new tool categories are added
+
+### Adding New Context Categories
+
+1. Create `Resources/mcp-bridge/contexts/newcategory.md`
+2. Add entry to `CONTEXT_CONFIG` in `context-loader.js`
+3. Update CLAUDE.md and README.md
+
+### Context Accuracy Guidelines
+
+- All code examples must be verified against UE 5.7 API
+- Use web search to confirm API signatures before documenting
+- Remove deprecated patterns from older engine versions
+
+---
+
 ## Testing Standards
 
 ### Automation Test Pattern

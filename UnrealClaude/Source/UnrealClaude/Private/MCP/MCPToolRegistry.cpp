@@ -92,6 +92,18 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 	// Create and register async task queue tools
 	// Task queue takes a raw pointer since the registry always outlives it
 	TaskQueue = MakeShared<FMCPTaskQueue>(this);
+
+	// Wire up execute_script to use the task queue for async execution
+	// This allows script execution to handle permission dialogs without timing out
+	if (TSharedPtr<IMCPTool>* ExecuteScriptToolPtr = Tools.Find(TEXT("execute_script")))
+	{
+		if (FMCPTool_ExecuteScript* ExecuteScriptTool = static_cast<FMCPTool_ExecuteScript*>(ExecuteScriptToolPtr->Get()))
+		{
+			ExecuteScriptTool->SetTaskQueue(TaskQueue);
+			UE_LOG(LogUnrealClaude, Log, TEXT("  Wired up execute_script to task queue for async execution"));
+		}
+	}
+
 	RegisterTool(MakeShared<FMCPTool_TaskSubmit>(TaskQueue));
 	RegisterTool(MakeShared<FMCPTool_TaskStatus>(TaskQueue));
 	RegisterTool(MakeShared<FMCPTool_TaskResult>(TaskQueue));

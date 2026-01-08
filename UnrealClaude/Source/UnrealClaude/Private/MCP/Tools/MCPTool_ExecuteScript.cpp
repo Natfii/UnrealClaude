@@ -1,11 +1,72 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "MCPTool_ExecuteScript.h"
+#include "../MCPTaskQueue.h"
 #include "ScriptExecutionManager.h"
 #include "ScriptTypes.h"
 #include "UnrealClaudeModule.h"
 
 FMCPToolResult FMCPTool_ExecuteScript::Execute(const TSharedRef<FJsonObject>& Params)
+{
+	// Check if this is a synchronous call from the task queue
+	bool bSync = false;
+	Params->TryGetBoolField(TEXT("_sync"), bSync);
+
+	if (bSync)
+	{
+		// Called from task queue - execute synchronously
+		return ExecuteSync(Params);
+	}
+
+	// Async execution - submit to task queue
+	if (!TaskQueue.IsValid())
+	{
+		// Fallback to sync if no task queue (shouldn't happen in practice)
+		UE_LOG(LogUnrealClaude, Warning, TEXT("execute_script: No task queue available, falling back to sync execution"));
+		return ExecuteSync(Params);
+	}
+
+	// Clone params and add _sync flag for when task queue executes
+	TSharedPtr<FJsonObject> AsyncParams = MakeShared<FJsonObject>();
+	for (const auto& Field : Params->Values)
+	{
+		AsyncParams->SetField(Field.Key, FJsonValue::Duplicate(Field.Value));
+	}
+	AsyncParams->SetBoolField(TEXT("_sync"), true);
+
+	// Submit with 10-minute timeout for permission dialogs
+	constexpr uint32 ScriptTimeoutMs = 600000; // 10 minutes
+	FGuid TaskId = TaskQueue->SubmitTask(TEXT("execute_script"), AsyncParams, ScriptTimeoutMs);
+
+	if (!TaskId.IsValid())
+	{
+		return FMCPToolResult::Error(TEXT("Failed to submit script execution task - queue may be at capacity"));
+	}
+
+	// Return task ID for polling
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("task_id"), TaskId.ToString());
+	ResultData->SetStringField(TEXT("status"), TEXT("pending"));
+	ResultData->SetStringField(TEXT("message"), TEXT("Script submitted for execution. Use task_status/task_result to check progress."));
+	ResultData->SetNumberField(TEXT("timeout_ms"), ScriptTimeoutMs);
+
+	// Include script info
+	FString ScriptType, Description;
+	Params->TryGetStringField(TEXT("script_type"), ScriptType);
+	Params->TryGetStringField(TEXT("description"), Description);
+	ResultData->SetStringField(TEXT("script_type"), ScriptType);
+	if (!Description.IsEmpty())
+	{
+		ResultData->SetStringField(TEXT("description"), Description);
+	}
+
+	return FMCPToolResult::Success(
+		FString::Printf(TEXT("Script execution queued. Task ID: %s. Poll task_status('%s') for progress."),
+			*TaskId.ToString(), *TaskId.ToString()),
+		ResultData);
+}
+
+FMCPToolResult FMCPTool_ExecuteScript::ExecuteSync(const TSharedRef<FJsonObject>& Params)
 {
 	// Get script type
 	FString ScriptTypeStr;

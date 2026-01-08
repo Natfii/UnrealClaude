@@ -154,4 +154,44 @@ private:
 		FVector2D Position,
 		FString& OutError
 	);
+
+	// ===== Pin Type Auto-Detection Helpers =====
+
+	/**
+	 * Detect the comparison type from a pin's type info
+	 * @param Pin Pin to analyze
+	 * @return Appropriate comparison type for the pin
+	 */
+	static EComparisonPinType DetectComparisonTypeFromPin(const UEdGraphPin* Pin);
+
+	/**
+	 * Check if a node is a KismetMathLibrary comparison node
+	 * @param Node Node to check
+	 * @param OutComparisonType If comparison node, the type of comparison (Greater, Less, etc.)
+	 * @param OutPinType If comparison node, the pin type it's configured for
+	 * @return True if node is a comparison node
+	 */
+	static bool IsComparisonNode(
+		const UEdGraphNode* Node,
+		FString& OutComparisonType,
+		EComparisonPinType& OutPinType
+	);
+
+	/**
+	 * Recreate a comparison node with a different pin type
+	 * Preserves position and metadata, recreates with correct function
+	 * @param Graph Graph containing the node
+	 * @param ExistingNode Existing comparison node to replace
+	 * @param ComparisonType Type of comparison (Greater, Less, etc.)
+	 * @param NewPinType New pin type for the comparison
+	 * @param OutError Error message if failed
+	 * @return New comparison node or nullptr
+	 */
+	static UEdGraphNode* RecreateComparisonNodeWithType(
+		UEdGraph* Graph,
+		UEdGraphNode* ExistingNode,
+		const FString& ComparisonType,
+		EComparisonPinType NewPinType,
+		FString& OutError
+	);
 };

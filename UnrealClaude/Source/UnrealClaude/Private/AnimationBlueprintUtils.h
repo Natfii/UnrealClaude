@@ -11,6 +11,9 @@
 #include "AnimGraphEditor.h"
 #include "AnimAssetManager.h"
 
+// Forward declarations for ASCII diagram generation
+class UAnimStateTransitionNode;
+
 /**
  * Animation Blueprint Utilities - Facade
  *
@@ -459,6 +462,21 @@ public:
 	);
 
 	/**
+	 * Generate ASCII diagram of a state machine for visualization
+	 * Includes state machine structure, transitions, and abbreviated conditions
+	 *
+	 * @param AnimBP Animation Blueprint
+	 * @param StateMachineName State machine to visualize
+	 * @param OutError Error message if failed
+	 * @return JSON result with "ascii_diagram" and "enhanced_info" fields
+	 */
+	static TSharedPtr<FJsonObject> GetStateMachineDiagram(
+		UAnimBlueprint* AnimBP,
+		const FString& StateMachineName,
+		FString& OutError
+	);
+
+	/**
 	 * Setup transition conditions in bulk using pattern matching (setup_transition_conditions)
 	 *
 	 * Supports multiple matching modes:
@@ -501,4 +519,37 @@ private:
 	static bool MatchesRegex(const FString& StateName, const FString& Pattern);
 	// Internal helpers
 	static bool ValidateAnimBlueprintForOperation(UAnimBlueprint* AnimBP, FString& OutError);
+
+	// ASCII diagram helpers
+	struct FDiagramState
+	{
+		FString Name;
+		int32 GridX = 0;
+		int32 GridY = 0;
+		bool bIsEntry = false;
+		FString AnimationName;
+	};
+
+	struct FDiagramTransition
+	{
+		FString FromState;
+		FString ToState;
+		FString ConditionAbbrev; // Abbreviated condition (e.g., "Speed>10 & Time<0.2")
+		float Duration = 0.2f;
+	};
+
+	/** Abbreviate transition condition graph to a short string */
+	static FString AbbreviateTransitionCondition(UAnimStateTransitionNode* TransitionNode);
+
+	/** Generate ASCII diagram string from states and transitions */
+	static FString GenerateASCIIDiagram(
+		const TArray<FDiagramState>& States,
+		const TArray<FDiagramTransition>& Transitions
+	);
+
+	/** Calculate grid layout for states */
+	static void CalculateStateLayout(
+		TArray<FDiagramState>& States,
+		const TArray<FDiagramTransition>& Transitions
+	);
 };

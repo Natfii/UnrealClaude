@@ -7,8 +7,17 @@
 #include "AnimGraphNode_StateMachine.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
+#include "AnimGraphNode_TransitionResult.h"
+#include "AnimGraphNode_SequencePlayer.h"
+#include "AnimGraphNode_BlendSpacePlayer.h"
+#include "AnimationStateMachineGraph.h"
+#include "AnimStateEntryNode.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_TransitionRuleGetter.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
 #include "Internationalization/Regex.h"
@@ -77,6 +86,13 @@ bool FAnimationBlueprintUtils::CompileAnimBlueprint(UAnimBlueprint* AnimBP, FStr
 	{
 		OutError = TEXT("Animation Blueprint compilation failed with errors");
 		return false;
+	}
+
+	// Auto-save after successful compile
+	FString AssetPath = AnimBP->GetPathName();
+	if (!UEditorAssetLibrary::SaveAsset(AssetPath, false))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("CompileAnimBlueprint: Failed to auto-save asset %s"), *AssetPath);
 	}
 
 	return true;
@@ -1822,6 +1838,562 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 		Result->SetStringField(TEXT("compile_error"), CompileError);
 	}
 	Result->SetArrayField(TEXT("results"), ResultsArray);
+
+	return Result;
+}
+
+// ===== ASCII Diagram Generation =====
+
+FString FAnimationBlueprintUtils::AbbreviateTransitionCondition(UAnimStateTransitionNode* TransitionNode)
+{
+	if (!TransitionNode)
+	{
+		return TEXT("(none)");
+	}
+
+	UEdGraph* TransitionGraph = TransitionNode->BoundGraph;
+	if (!TransitionGraph)
+	{
+		return TEXT("(none)");
+	}
+
+	// Find what's connected to the result node
+	TArray<FString> ConditionParts;
+
+	for (UEdGraphNode* Node : TransitionGraph->Nodes)
+	{
+		if (!Node) continue;
+
+		// Check for UK2Node_CallFunction comparison nodes
+		if (UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
+		{
+			FName FunctionName = CallNode->FunctionReference.GetMemberName();
+			FString FuncStr = FunctionName.ToString();
+
+			// Detect comparison functions
+			FString CompOp;
+			bool bIsComparison = false;
+
+			if (FuncStr.Contains(TEXT("Greater_")) && !FuncStr.Contains(TEXT("Equal")))
+			{
+				CompOp = TEXT(">");
+				bIsComparison = true;
+			}
+			else if (FuncStr.Contains(TEXT("Less_")) && !FuncStr.Contains(TEXT("Equal")))
+			{
+				CompOp = TEXT("<");
+				bIsComparison = true;
+			}
+			else if (FuncStr.Contains(TEXT("GreaterEqual")))
+			{
+				CompOp = TEXT(">=");
+				bIsComparison = true;
+			}
+			else if (FuncStr.Contains(TEXT("LessEqual")))
+			{
+				CompOp = TEXT("<=");
+				bIsComparison = true;
+			}
+			else if (FuncStr.Contains(TEXT("EqualEqual")))
+			{
+				CompOp = TEXT("==");
+				bIsComparison = true;
+			}
+			else if (FuncStr.Contains(TEXT("NotEqual")))
+			{
+				CompOp = TEXT("!=");
+				bIsComparison = true;
+			}
+
+			if (bIsComparison)
+			{
+				// Get what's connected to input A (usually variable)
+				FString LeftSide = TEXT("?");
+				FString RightSide = TEXT("?");
+
+				for (UEdGraphPin* Pin : CallNode->Pins)
+				{
+					if (!Pin) continue;
+
+					if (Pin->GetFName() == TEXT("A") && Pin->Direction == EGPD_Input)
+					{
+						if (Pin->LinkedTo.Num() > 0)
+						{
+							UEdGraphPin* SourcePin = Pin->LinkedTo[0];
+							if (SourcePin && SourcePin->GetOwningNode())
+							{
+								// Check if source is a variable get node
+								if (UK2Node_VariableGet* VarNode = Cast<UK2Node_VariableGet>(SourcePin->GetOwningNode()))
+								{
+									LeftSide = VarNode->GetVarName().ToString();
+								}
+								else if (UK2Node_TransitionRuleGetter* GetterNode = Cast<UK2Node_TransitionRuleGetter>(SourcePin->GetOwningNode()))
+								{
+									// It's a TimeRemaining node
+									LeftSide = TEXT("TimeRem");
+								}
+							}
+						}
+						else if (!Pin->DefaultValue.IsEmpty())
+						{
+							LeftSide = Pin->DefaultValue;
+						}
+					}
+					else if (Pin->GetFName() == TEXT("B") && Pin->Direction == EGPD_Input)
+					{
+						if (!Pin->DefaultValue.IsEmpty())
+						{
+							RightSide = Pin->DefaultValue;
+						}
+						else if (Pin->LinkedTo.Num() > 0)
+						{
+							RightSide = TEXT("(link)");
+						}
+					}
+				}
+
+				ConditionParts.Add(FString::Printf(TEXT("%s%s%s"), *LeftSide, *CompOp, *RightSide));
+			}
+		}
+		// Check for TimeRemaining getter that's directly connected
+		else if (UK2Node_TransitionRuleGetter* GetterNode = Cast<UK2Node_TransitionRuleGetter>(Node))
+		{
+			// Check if output is directly connected to result (no comparison)
+			for (UEdGraphPin* Pin : GetterNode->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
+				{
+					// If connected directly to result node input
+					UEdGraphNode* TargetNode = Pin->LinkedTo[0]->GetOwningNode();
+					if (TargetNode && TargetNode->IsA<UAnimGraphNode_TransitionResult>())
+					{
+						ConditionParts.Add(TEXT("TimeRem"));
+					}
+				}
+			}
+		}
+	}
+
+	if (ConditionParts.Num() == 0)
+	{
+		return TEXT("(auto)");
+	}
+
+	return FString::Join(ConditionParts, TEXT(" & "));
+}
+
+void FAnimationBlueprintUtils::CalculateStateLayout(
+	TArray<FDiagramState>& States,
+	const TArray<FDiagramTransition>& Transitions)
+{
+	if (States.Num() == 0) return;
+
+	// Simple layout: find entry state, put it on left
+	// Then place connected states to the right, spreading vertically
+
+	// Find entry state and put at (0, 0)
+	int32 EntryIndex = -1;
+	for (int32 i = 0; i < States.Num(); i++)
+	{
+		if (States[i].bIsEntry)
+		{
+			EntryIndex = i;
+			States[i].GridX = 0;
+			States[i].GridY = 0;
+			break;
+		}
+	}
+
+	// If no entry state found, use first state
+	if (EntryIndex == -1 && States.Num() > 0)
+	{
+		EntryIndex = 0;
+		States[0].GridX = 0;
+		States[0].GridY = 0;
+	}
+
+	// Build adjacency for BFS layout
+	TMap<FString, TArray<FString>> Outgoing;
+	for (const FDiagramTransition& Trans : Transitions)
+	{
+		Outgoing.FindOrAdd(Trans.FromState).Add(Trans.ToState);
+	}
+
+	// BFS to assign grid positions
+	TSet<FString> Visited;
+	TArray<FString> Queue;
+
+	if (EntryIndex >= 0)
+	{
+		Queue.Add(States[EntryIndex].Name);
+		Visited.Add(States[EntryIndex].Name);
+	}
+
+	int32 CurrentX = 0;
+	while (Queue.Num() > 0)
+	{
+		// Get all states at current X level
+		TArray<FString> CurrentLevel = Queue;
+		Queue.Empty();
+
+		int32 YOffset = 0;
+		for (const FString& StateName : CurrentLevel)
+		{
+			// Find and set Y position for states at this X level
+			for (FDiagramState& State : States)
+			{
+				if (State.Name == StateName && State.GridX == CurrentX)
+				{
+					State.GridY = YOffset;
+					YOffset++;
+				}
+			}
+
+			// Add connected states to next level
+			if (TArray<FString>* Connected = Outgoing.Find(StateName))
+			{
+				for (const FString& NextState : *Connected)
+				{
+					if (!Visited.Contains(NextState))
+					{
+						Visited.Add(NextState);
+						Queue.Add(NextState);
+
+						// Assign X position
+						for (FDiagramState& State : States)
+						{
+							if (State.Name == NextState)
+							{
+								State.GridX = CurrentX + 1;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+		CurrentX++;
+	}
+
+	// Handle disconnected states
+	int32 DisconnectedY = 0;
+	for (FDiagramState& State : States)
+	{
+		if (!Visited.Contains(State.Name))
+		{
+			State.GridX = CurrentX;
+			State.GridY = DisconnectedY++;
+		}
+	}
+}
+
+FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
+	const TArray<FDiagramState>& States,
+	const TArray<FDiagramTransition>& Transitions)
+{
+	if (States.Num() == 0)
+	{
+		return TEXT("(empty state machine)");
+	}
+
+	// Find grid dimensions
+	int32 MaxX = 0, MaxY = 0;
+	for (const FDiagramState& State : States)
+	{
+		MaxX = FMath::Max(MaxX, State.GridX);
+		MaxY = FMath::Max(MaxY, State.GridY);
+	}
+
+	// Build a grid-based diagram
+	// Each cell is roughly: "[ StateName ]" with transitions between
+	const int32 CellWidth = 20;  // Width for each state cell
+	const int32 CellHeight = 3;  // Height for each state cell row
+
+	// Create output lines
+	TArray<FString> Lines;
+	FString TitleLine = TEXT("State Machine Diagram:");
+	Lines.Add(TitleLine);
+	Lines.Add(TEXT(""));
+
+	// Build state map by grid position
+	TMap<TPair<int32, int32>, const FDiagramState*> StateGrid;
+	for (const FDiagramState& State : States)
+	{
+		StateGrid.Add(TPair<int32, int32>(State.GridX, State.GridY), &State);
+	}
+
+	// Build transition map
+	TMap<TPair<FString, FString>, const FDiagramTransition*> TransitionMap;
+	for (const FDiagramTransition& Trans : Transitions)
+	{
+		TransitionMap.Add(TPair<FString, FString>(Trans.FromState, Trans.ToState), &Trans);
+	}
+
+	// Generate diagram row by row
+	for (int32 y = 0; y <= MaxY; y++)
+	{
+		// State row
+		FString StateRow;
+		FString ArrowRow;
+		FString ConditionRow;
+
+		for (int32 x = 0; x <= MaxX; x++)
+		{
+			if (const FDiagramState* const* StatePtr = StateGrid.Find(TPair<int32, int32>(x, y)))
+			{
+				const FDiagramState& State = **StatePtr;
+
+				// Format state name with brackets
+				FString StateName = State.Name;
+				if (StateName.Len() > 12)
+				{
+					StateName = StateName.Left(11) + TEXT(".");
+				}
+
+				FString StateBox;
+				if (State.bIsEntry)
+				{
+					StateBox = FString::Printf(TEXT("->[ %-12s ]"), *StateName);
+				}
+				else
+				{
+					StateBox = FString::Printf(TEXT("  [ %-12s ]"), *StateName);
+				}
+				StateRow += StateBox;
+
+				// Find transition to next column
+				if (x < MaxX)
+				{
+					// Look for any transition from this state to states in next column
+					bool bFoundTransition = false;
+					for (int32 nextY = 0; nextY <= MaxY; nextY++)
+					{
+						if (const FDiagramState* const* NextStatePtr = StateGrid.Find(TPair<int32, int32>(x + 1, nextY)))
+						{
+							const FDiagramState& NextState = **NextStatePtr;
+							if (const FDiagramTransition* const* TransPtr = TransitionMap.Find(
+								TPair<FString, FString>(State.Name, NextState.Name)))
+							{
+								ArrowRow += TEXT(" ----> ");
+								// Add abbreviated condition
+								FString Cond = (*TransPtr)->ConditionAbbrev;
+								if (Cond.Len() > 15)
+								{
+									Cond = Cond.Left(14) + TEXT(".");
+								}
+								ConditionRow += FString::Printf(TEXT(" %-15s"), *Cond);
+								bFoundTransition = true;
+								break;
+							}
+						}
+					}
+
+					if (!bFoundTransition)
+					{
+						ArrowRow += TEXT("       ");
+						ConditionRow += TEXT("               ");
+					}
+				}
+			}
+			else
+			{
+				// Empty cell
+				StateRow += FString::Printf(TEXT("%*s"), CellWidth, TEXT(""));
+				if (x < MaxX)
+				{
+					ArrowRow += TEXT("       ");
+					ConditionRow += TEXT("               ");
+				}
+			}
+		}
+
+		Lines.Add(StateRow);
+		if (!ArrowRow.IsEmpty())
+		{
+			Lines.Add(ArrowRow);
+		}
+		if (!ConditionRow.TrimStartAndEnd().IsEmpty())
+		{
+			Lines.Add(ConditionRow);
+		}
+		Lines.Add(TEXT(""));
+	}
+
+	// Add legend
+	Lines.Add(TEXT("Legend:"));
+	Lines.Add(TEXT("  -> = Entry state"));
+	Lines.Add(TEXT("  [...] = State name"));
+	Lines.Add(TEXT("  ----> = Transition (condition below)"));
+
+	// Add transition list
+	Lines.Add(TEXT(""));
+	Lines.Add(TEXT("All Transitions:"));
+	for (const FDiagramTransition& Trans : Transitions)
+	{
+		Lines.Add(FString::Printf(TEXT("  %s -> %s: %s (%.2fs)"),
+			*Trans.FromState, *Trans.ToState, *Trans.ConditionAbbrev, Trans.Duration));
+	}
+
+	return FString::Join(Lines, TEXT("\n"));
+}
+
+TSharedPtr<FJsonObject> FAnimationBlueprintUtils::GetStateMachineDiagram(
+	UAnimBlueprint* AnimBP,
+	const FString& StateMachineName,
+	FString& OutError)
+{
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+
+	if (!ValidateAnimBlueprintForOperation(AnimBP, OutError))
+	{
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), OutError);
+		return Result;
+	}
+
+	// Find state machine
+	UAnimGraphNode_StateMachine* StateMachine = FindStateMachine(AnimBP, StateMachineName, OutError);
+	if (!StateMachine)
+	{
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), OutError);
+		return Result;
+	}
+
+	// Get all states
+	TArray<UAnimStateNode*> States = GetAllStates(AnimBP, StateMachineName, OutError);
+	TArray<UAnimStateTransitionNode*> Transitions = GetAllTransitions(AnimBP, StateMachineName, OutError);
+
+	// Build diagram data structures
+	TArray<FDiagramState> DiagramStates;
+	TArray<FDiagramTransition> DiagramTransitions;
+
+	// Find entry state
+	UAnimationStateMachineGraph* Graph = nullptr;
+	if (StateMachine->EditorStateMachineGraph)
+	{
+		Graph = StateMachine->EditorStateMachineGraph;
+	}
+
+	FString EntryStateName;
+	if (Graph && Graph->EntryNode)
+	{
+		// Find what the entry node connects to
+		for (UEdGraphPin* Pin : Graph->EntryNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
+			{
+				UEdGraphNode* ConnectedNode = Pin->LinkedTo[0]->GetOwningNode();
+				if (UAnimStateNode* StateNode = Cast<UAnimStateNode>(ConnectedNode))
+				{
+					EntryStateName = StateNode->GetStateName();
+					break;
+				}
+			}
+		}
+	}
+
+	// Populate states
+	for (UAnimStateNode* State : States)
+	{
+		if (!State) continue;
+
+		FDiagramState DS;
+		DS.Name = State->GetStateName();
+		DS.bIsEntry = (DS.Name == EntryStateName);
+
+		// Get animation name if available
+		UEdGraph* StateGraph = State->GetBoundGraph();
+		if (StateGraph)
+		{
+			for (UEdGraphNode* Node : StateGraph->Nodes)
+			{
+				if (UAnimGraphNode_SequencePlayer* SeqNode = Cast<UAnimGraphNode_SequencePlayer>(Node))
+				{
+					// Get animation sequence name
+					if (SeqNode->GetAnimationAsset())
+					{
+						DS.AnimationName = SeqNode->GetAnimationAsset()->GetName();
+					}
+					break;
+				}
+				else if (UAnimGraphNode_BlendSpacePlayer* BSNode = Cast<UAnimGraphNode_BlendSpacePlayer>(Node))
+				{
+					if (BSNode->GetAnimationAsset())
+					{
+						DS.AnimationName = BSNode->GetAnimationAsset()->GetName();
+					}
+					break;
+				}
+			}
+		}
+
+		DiagramStates.Add(DS);
+	}
+
+	// Populate transitions
+	for (UAnimStateTransitionNode* Trans : Transitions)
+	{
+		if (!Trans) continue;
+
+		UAnimStateNodeBase* PrevState = Trans->GetPreviousState();
+		UAnimStateNodeBase* NextState = Trans->GetNextState();
+
+		if (!PrevState || !NextState) continue;
+
+		FDiagramTransition DT;
+		DT.FromState = PrevState->GetStateName();
+		DT.ToState = NextState->GetStateName();
+		DT.Duration = Trans->CrossfadeDuration;
+		DT.ConditionAbbrev = AbbreviateTransitionCondition(Trans);
+
+		DiagramTransitions.Add(DT);
+	}
+
+	// Calculate layout
+	CalculateStateLayout(DiagramStates, DiagramTransitions);
+
+	// Generate ASCII diagram
+	FString ASCIIDiagram = GenerateASCIIDiagram(DiagramStates, DiagramTransitions);
+
+	// Build enhanced JSON info
+	TSharedPtr<FJsonObject> EnhancedInfo = MakeShared<FJsonObject>();
+
+	// States with positions
+	TArray<TSharedPtr<FJsonValue>> StatesArray;
+	for (const FDiagramState& DS : DiagramStates)
+	{
+		TSharedPtr<FJsonObject> StateObj = MakeShared<FJsonObject>();
+		StateObj->SetStringField(TEXT("name"), DS.Name);
+		StateObj->SetNumberField(TEXT("grid_x"), DS.GridX);
+		StateObj->SetNumberField(TEXT("grid_y"), DS.GridY);
+		StateObj->SetBoolField(TEXT("is_entry"), DS.bIsEntry);
+		if (!DS.AnimationName.IsEmpty())
+		{
+			StateObj->SetStringField(TEXT("animation"), DS.AnimationName);
+		}
+		StatesArray.Add(MakeShared<FJsonValueObject>(StateObj));
+	}
+	EnhancedInfo->SetArrayField(TEXT("states"), StatesArray);
+
+	// Transitions with conditions
+	TArray<TSharedPtr<FJsonValue>> TransitionsArray;
+	for (const FDiagramTransition& DT : DiagramTransitions)
+	{
+		TSharedPtr<FJsonObject> TransObj = MakeShared<FJsonObject>();
+		TransObj->SetStringField(TEXT("from"), DT.FromState);
+		TransObj->SetStringField(TEXT("to"), DT.ToState);
+		TransObj->SetStringField(TEXT("condition_summary"), DT.ConditionAbbrev);
+		TransObj->SetNumberField(TEXT("duration"), DT.Duration);
+		TransitionsArray.Add(MakeShared<FJsonValueObject>(TransObj));
+	}
+	EnhancedInfo->SetArrayField(TEXT("transitions"), TransitionsArray);
+
+	// Build result
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("state_machine"), StateMachineName);
+	Result->SetStringField(TEXT("ascii_diagram"), ASCIIDiagram);
+	Result->SetObjectField(TEXT("enhanced_info"), EnhancedInfo);
 
 	return Result;
 }
