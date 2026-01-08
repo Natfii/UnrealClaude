@@ -314,6 +314,10 @@ Task queue features:
 
 The MCP server runs on port 3000 by default and starts automatically when the editor loads.
 
+#### Dynamic UE 5.7 Context System
+
+The MCP bridge includes a dynamic context loader that provides accurate UE 5.7 API documentation on demand. Use `unreal_get_ue_context` to query by category (animation, blueprint, slate, actor, assets, replication) or search by keywords. Context status is shown in `unreal_status` output.
+
 ## Configuration
 
 ### Custom System Prompts
