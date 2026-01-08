@@ -12,7 +12,6 @@ UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs
 
 **Key Features:**
 - **Native Editor Integration** - Chat panel docked in your editor
-- **UE5.7 Context** - System prompts optimized for Unreal Engine 5.7 development
 - **MCP Server** - Model Context Protocol server for external tool integration
 - **Dynamic UE 5.7 Context System** - The MCP bridge includes a dynamic context loader that provides accurate UE 5.7 API documentation on demand
 - **Blueprint Editing** - Create and modify Blueprints, Animation Blueprints, state machines (Few bugs still, don't rely on fully)
