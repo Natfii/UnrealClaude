@@ -23,6 +23,7 @@
 #include "Tools/MCPTool_AssetSearch.h"
 #include "Tools/MCPTool_AssetDependencies.h"
 #include "Tools/MCPTool_AssetReferencers.h"
+#include "Tools/MCPTool_EnhancedInput.h"
 
 // Task queue tools
 #include "Tools/MCPTool_TaskSubmit.h"
@@ -88,6 +89,9 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 	RegisterTool(MakeShared<FMCPTool_AssetSearch>());
 	RegisterTool(MakeShared<FMCPTool_AssetDependencies>());
 	RegisterTool(MakeShared<FMCPTool_AssetReferencers>());
+
+	// Enhanced Input tools
+	RegisterTool(MakeShared<FMCPTool_EnhancedInput>());
 
 	// Create and register async task queue tools
 	// Task queue takes a raw pointer since the registry always outlives it

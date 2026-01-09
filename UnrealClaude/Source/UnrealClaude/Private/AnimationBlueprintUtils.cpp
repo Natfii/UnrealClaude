@@ -1,6 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "AnimationBlueprintUtils.h"
+#include "UnrealClaudeConstants.h"
 #include "AnimTransitionConditionFactory.h"
 #include "Animation/AnimBlueprint.h"
 #include "Animation/BlendSpace1D.h"
@@ -1648,8 +1649,8 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 
 			// Track node IDs for connecting with logic operators
 			TArray<FString> ConditionNodeIds;
-			int32 PosX = 100;
-			int32 PosY = 100;
+			int32 PosX = UnrealClaudeConstants::AnimDiagram::ConditionNodeStartX;
+			int32 PosY = UnrealClaudeConstants::AnimDiagram::ConditionNodeStartY;
 
 			// Apply each condition
 			for (const TSharedPtr<FJsonValue>& CondValue : Conditions)
@@ -1689,7 +1690,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::SetupTransitionConditions(
 						FString CompNodeId;
 						UEdGraphNode* CompNode = AddConditionNode(
 							AnimBP, StateMachineName, FromStateName, ToStateName,
-							Comparison, nullptr, FVector2D(PosX + 200, PosY),
+							Comparison, nullptr, FVector2D(PosX + UnrealClaudeConstants::AnimDiagram::ConditionNodeSpacing, PosY),
 							CompNodeId, NodeError);
 
 						if (CompNode)
@@ -2106,8 +2107,8 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 
 	// Build a grid-based diagram
 	// Each cell is roughly: "[ StateName ]" with transitions between
-	const int32 CellWidth = 20;  // Width for each state cell
-	const int32 CellHeight = 3;  // Height for each state cell row
+	const int32 CellWidth = UnrealClaudeConstants::AnimDiagram::DiagramCellWidth;
+	const int32 CellHeight = UnrealClaudeConstants::AnimDiagram::DiagramCellHeight;
 
 	// Create output lines
 	TArray<FString> Lines;
@@ -2145,9 +2146,9 @@ FString FAnimationBlueprintUtils::GenerateASCIIDiagram(
 
 				// Format state name with brackets
 				FString StateName = State.Name;
-				if (StateName.Len() > 12)
+				if (StateName.Len() > UnrealClaudeConstants::AnimDiagram::MaxStateNameDisplayLength)
 				{
-					StateName = StateName.Left(11) + TEXT(".");
+					StateName = StateName.Left(UnrealClaudeConstants::AnimDiagram::MaxStateNameDisplayLength - 1) + TEXT(".");
 				}
 
 				FString StateBox;

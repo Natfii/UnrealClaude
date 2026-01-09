@@ -102,9 +102,6 @@ public:
 	static bool ValidateBlueprintFunctionName(const FString& FunctionName, FString& OutError);
 
 private:
-	/** Characters that are never allowed in actor names */
-	static const TCHAR* DangerousChars;
-
 	/** Console commands that are blocked for safety */
 	static const TArray<FString>& GetBlockedConsoleCommands();
 };

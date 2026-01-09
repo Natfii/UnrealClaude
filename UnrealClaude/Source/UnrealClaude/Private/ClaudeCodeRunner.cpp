@@ -634,7 +634,7 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 	while (!StopTaskCounter.GetValue())
 	{
 		// Check if process is done
-		DWORD WaitResult = WaitForSingleObject(hProcess, 100);
+		DWORD WaitResult = WaitForSingleObject(hProcess, UnrealClaudeConstants::Process::WaitTimeoutMs);
 
 		// Read any available output
 		while (ReadFile(StdOutReadPipe, Buffer, sizeof(Buffer) - 1, &BytesRead, NULL) && BytesRead > 0)

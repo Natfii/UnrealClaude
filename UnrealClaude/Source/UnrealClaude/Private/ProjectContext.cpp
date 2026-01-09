@@ -1,6 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "ProjectContext.h"
+#include "UnrealClaudeConstants.h"
 #include "UnrealClaudeModule.h"
 #include "Editor.h"
 #include "Engine/World.h"
@@ -134,7 +135,7 @@ bool FProjectContextManager::ParseSingleUClass(const FString& FileContent, const
 {
 	// Find the class keyword after UCLASS(...)
 	int32 ClassPos = FileContent.Find(TEXT("class "), ESearchCase::CaseSensitive, ESearchDir::FromStart, UClassPos);
-	if (ClassPos == INDEX_NONE || ClassPos > UClassPos + 500)
+	if (ClassPos == INDEX_NONE || ClassPos > UClassPos + UnrealClaudeConstants::Context::MaxUClassToClassKeywordDistance)
 	{
 		OutNextSearchPos = UClassPos + 6;
 		return false;
@@ -167,7 +168,7 @@ bool FProjectContextManager::ParseSingleUClass(const FString& FileContent, const
 	// Find parent class (after ": public ")
 	FString ParentClass;
 	int32 InheritPos = FileContent.Find(TEXT(": public "), ESearchCase::IgnoreCase, ESearchDir::FromStart, ClassNameEnd);
-	if (InheritPos != INDEX_NONE && InheritPos < ClassNameEnd + 50)
+	if (InheritPos != INDEX_NONE && InheritPos < ClassNameEnd + UnrealClaudeConstants::Context::MaxClassNameToInheritanceDistance)
 	{
 		int32 ParentEnd;
 		ParentClass = ParseIdentifier(FileContent, InheritPos + 9, ParentEnd);
@@ -315,7 +316,7 @@ FString FProjectContextManager::FormatContextForPrompt() const
 	if (CachedContext.UClasses.Num() > 0)
 	{
 		Context += TEXT("Project C++ Classes:\n");
-		int32 MaxClasses = FMath::Min(CachedContext.UClasses.Num(), 30);
+		int32 MaxClasses = FMath::Min(CachedContext.UClasses.Num(), UnrealClaudeConstants::Context::MaxClassesToFormat);
 		for (int32 i = 0; i < MaxClasses; ++i)
 		{
 			const FUClassInfo& ClassInfo = CachedContext.UClasses[i];
@@ -351,9 +352,9 @@ FString FProjectContextManager::FormatContextForPrompt() const
 		int32 DirCount = 0;
 		for (const auto& Pair : FilesByDir)
 		{
-			if (DirCount++ >= 10) // Limit directories shown
+			if (DirCount++ >= UnrealClaudeConstants::Context::MaxDirectoriesToShow)
 			{
-				Context += FString::Printf(TEXT("  ... and %d more directories\n"), FilesByDir.Num() - 10);
+				Context += FString::Printf(TEXT("  ... and %d more directories\n"), FilesByDir.Num() - UnrealClaudeConstants::Context::MaxDirectoriesToShow);
 				break;
 			}
 			Context += FString::Printf(TEXT("  %s/ (%d files)\n"), *Pair.Key, Pair.Value.Num());

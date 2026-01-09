@@ -1,6 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "ClaudeSessionManager.h"
+#include "UnrealClaudeConstants.h"
 #include "JsonUtils.h"
 #include "UnrealClaudeModule.h"
 #include "Misc/Paths.h"
@@ -8,7 +9,7 @@
 #include "HAL/FileManager.h"
 
 FClaudeSessionManager::FClaudeSessionManager()
-	: MaxHistorySize(50)
+	: MaxHistorySize(UnrealClaudeConstants::Session::MaxHistorySize)
 {
 }
 

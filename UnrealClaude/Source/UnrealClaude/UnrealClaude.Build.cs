@@ -57,7 +57,9 @@ public class UnrealClaude : ModuleRules
 				"AnimGraph",
 				"AnimGraphRuntime",
 				// Asset saving
-				"EditorScriptingUtilities"
+				"EditorScriptingUtilities",
+				// Enhanced Input
+				"EnhancedInput"
 			}
 		);
 

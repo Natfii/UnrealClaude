@@ -113,6 +113,29 @@ const CONTEXT_CONFIG = {
       "authority",
     ],
   },
+  enhanced_input: {
+    files: ["enhanced_input.md"],
+    toolPatterns: [/enhanced_input/, /input_action/, /mapping_context/],
+    keywords: [
+      "enhanced input",
+      "input action",
+      "mapping context",
+      "inputaction",
+      "inputmappingcontext",
+      "trigger",
+      "modifier",
+      "key binding",
+      "keybinding",
+      "gamepad",
+      "controller",
+      "keyboard mapping",
+      "input mapping",
+      "dead zone",
+      "deadzone",
+      "axis",
+      "chord",
+    ],
+  },
 };
 
 // Cache for loaded context files

@@ -3,9 +3,6 @@
 #include "MCPParamValidator.h"
 #include "UnrealClaudeConstants.h"
 
-// Characters that could be used for injection attacks or cause issues
-const TCHAR* FMCPParamValidator::DangerousChars = TEXT("<>|&;`$(){}[]!*?~");
-
 // Use constants from centralized header
 using namespace UnrealClaudeConstants::MCPValidation;
 
@@ -69,10 +66,11 @@ bool FMCPParamValidator::ValidateActorName(const FString& Name, FString& OutErro
 		return false;
 	}
 
-	// Check for dangerous characters
+	// Check for dangerous characters (optimized: avoid FString allocation in loop)
+	int32 FoundIndex;
 	for (const TCHAR* c = DangerousChars; *c; ++c)
 	{
-		if (Name.Contains(FString(1, c)))
+		if (Name.FindChar(*c, FoundIndex))
 		{
 			OutError = FString::Printf(TEXT("Actor name contains invalid character: '%c'"), *c);
 			return false;
@@ -148,10 +146,11 @@ bool FMCPParamValidator::ValidateClassPath(const FString& ClassPath, FString& Ou
 	}
 
 	// Check for dangerous characters (excluding / and . which are valid in paths)
-	const TCHAR* ClassDangerousChars = TEXT("<>|&;`$(){}[]!*?~");
-	for (const TCHAR* c = ClassDangerousChars; *c; ++c)
+	// Optimized: avoid FString allocation in loop
+	int32 FoundIndex;
+	for (const TCHAR* c = DangerousChars; *c; ++c)
 	{
-		if (ClassPath.Contains(FString(1, c)))
+		if (ClassPath.FindChar(*c, FoundIndex))
 		{
 			OutError = FString::Printf(TEXT("Class path contains invalid character: '%c'"), *c);
 			return false;
@@ -249,27 +248,31 @@ bool FMCPParamValidator::ValidateStringLength(const FString& Value, const FStrin
 
 FString FMCPParamValidator::SanitizeString(const FString& Input)
 {
-	FString Output = Input;
+	// Build result without dangerous characters in single pass (optimized)
+	FString Output;
+	Output.Reserve(Input.Len());
 
-	// Remove dangerous characters
-	for (const TCHAR* c = DangerousChars; *c; ++c)
+	for (TCHAR InputChar : Input)
 	{
-		TCHAR CharStr[2] = { *c, TEXT('\0') };
-		Output = Output.Replace(CharStr, TEXT(""));
-	}
-
-	// Remove control characters
-	FString Sanitized;
-	Sanitized.Reserve(Output.Len());
-	for (TCHAR c : Output)
-	{
-		if (c >= 32 || c == TEXT('\0'))
+		// Check if this character is in the dangerous chars list
+		bool bIsDangerous = false;
+		for (const TCHAR* c = DangerousChars; *c; ++c)
 		{
-			Sanitized.AppendChar(c);
+			if (InputChar == *c)
+			{
+				bIsDangerous = true;
+				break;
+			}
+		}
+
+		// Only keep non-dangerous, non-control characters
+		if (!bIsDangerous && (InputChar >= 32 || InputChar == TEXT('\0')))
+		{
+			Output.AppendChar(InputChar);
 		}
 	}
 
-	return Sanitized;
+	return Output;
 }
 
 bool FMCPParamValidator::ValidateBlueprintPath(const FString& BlueprintPath, FString& OutError)
@@ -301,10 +304,11 @@ bool FMCPParamValidator::ValidateBlueprintPath(const FString& BlueprintPath, FSt
 	}
 
 	// Check for dangerous characters
-	const TCHAR* PathDangerousChars = TEXT("<>|&;`$(){}[]!*?~");
-	for (const TCHAR* c = PathDangerousChars; *c; ++c)
+	// Optimized: avoid FString allocation in loop
+	int32 FoundIndex;
+	for (const TCHAR* c = DangerousChars; *c; ++c)
 	{
-		if (BlueprintPath.Contains(FString(1, c)))
+		if (BlueprintPath.FindChar(*c, FoundIndex))
 		{
 			OutError = FString::Printf(TEXT("Blueprint path contains invalid character: '%c'"), *c);
 			return false;
