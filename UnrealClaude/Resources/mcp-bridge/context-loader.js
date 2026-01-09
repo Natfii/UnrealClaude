@@ -136,6 +136,30 @@ const CONTEXT_CONFIG = {
       "chord",
     ],
   },
+  character: {
+    files: ["character.md"],
+    toolPatterns: [/^character/, /character_data/, /movement_param/],
+    keywords: [
+      "character",
+      "acharacter",
+      "movement",
+      "charactermovement",
+      "walk speed",
+      "jump velocity",
+      "air control",
+      "gravity scale",
+      "capsule",
+      "character data",
+      "stats table",
+      "character config",
+      "health",
+      "stamina",
+      "damage multiplier",
+      "defense",
+      "player character",
+      "npc",
+    ],
+  },
 };
 
 // Cache for loaded context files
