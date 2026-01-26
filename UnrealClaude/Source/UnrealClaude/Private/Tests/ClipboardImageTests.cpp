@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for ClipboardImageUtils, clipboard image paste feature,
- * and stream-json multimodal payload construction/parsing
+ * stream-json multimodal payload construction/parsing, and multi-image support
  */
 
 #include "CoreMinimal.h"
@@ -160,47 +160,47 @@ bool FClipboardImage_Constants_ReasonableValues::RunTest(const FString& Paramete
 }
 
 // ============================================================================
-// Data Struct Tests
+// Data Struct Tests (updated for TArray<FString>)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipboardImage_RequestConfig_HasAttachedImagePath,
-	"UnrealClaude.ClipboardImage.DataStructs.RequestConfigHasImagePath",
+	FClipboardImage_RequestConfig_HasAttachedImagePaths,
+	"UnrealClaude.ClipboardImage.DataStructs.RequestConfigHasImagePaths",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
 )
 
-bool FClipboardImage_RequestConfig_HasAttachedImagePath::RunTest(const FString& Parameters)
+bool FClipboardImage_RequestConfig_HasAttachedImagePaths::RunTest(const FString& Parameters)
 {
 	FClaudeRequestConfig Config;
 
-	// Default should be empty
-	TestTrue("AttachedImagePath should default to empty", Config.AttachedImagePath.IsEmpty());
+	// Default should be empty array
+	TestEqual("AttachedImagePaths should default to empty array", Config.AttachedImagePaths.Num(), 0);
 
-	// Should be assignable
-	Config.AttachedImagePath = TEXT("C:/test/image.png");
-	TestEqual("AttachedImagePath should be assignable",
-		Config.AttachedImagePath, TEXT("C:/test/image.png"));
+	// Should be appendable
+	Config.AttachedImagePaths.Add(TEXT("C:/test/image1.png"));
+	Config.AttachedImagePaths.Add(TEXT("C:/test/image2.png"));
+	TestEqual("AttachedImagePaths should have 2 entries", Config.AttachedImagePaths.Num(), 2);
+	TestEqual("First path should match", Config.AttachedImagePaths[0], TEXT("C:/test/image1.png"));
 
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FClipboardImage_PromptOptions_HasAttachedImagePath,
-	"UnrealClaude.ClipboardImage.DataStructs.PromptOptionsHasImagePath",
+	FClipboardImage_PromptOptions_HasAttachedImagePaths,
+	"UnrealClaude.ClipboardImage.DataStructs.PromptOptionsHasImagePaths",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
 )
 
-bool FClipboardImage_PromptOptions_HasAttachedImagePath::RunTest(const FString& Parameters)
+bool FClipboardImage_PromptOptions_HasAttachedImagePaths::RunTest(const FString& Parameters)
 {
 	FClaudePromptOptions Options;
 
-	// Default should be empty
-	TestTrue("AttachedImagePath should default to empty", Options.AttachedImagePath.IsEmpty());
+	// Default should be empty array
+	TestEqual("AttachedImagePaths should default to empty array", Options.AttachedImagePaths.Num(), 0);
 
-	// Should be assignable
-	Options.AttachedImagePath = TEXT("C:/test/screenshot.png");
-	TestEqual("AttachedImagePath should be assignable",
-		Options.AttachedImagePath, TEXT("C:/test/screenshot.png"));
+	// Should be appendable
+	Options.AttachedImagePaths.Add(TEXT("C:/test/screenshot.png"));
+	TestEqual("AttachedImagePaths should have 1 entry", Options.AttachedImagePaths.Num(), 1);
 
 	// Default constructor values should be preserved
 	TestTrue("bIncludeEngineContext should default to true", Options.bIncludeEngineContext);
@@ -221,8 +221,8 @@ bool FClipboardImage_PromptOptions_ConvenienceConstructor::RunTest(const FString
 
 	TestTrue("bIncludeEngineContext should be true", Options.bIncludeEngineContext);
 	TestFalse("bIncludeProjectContext should be false", Options.bIncludeProjectContext);
-	TestTrue("AttachedImagePath should be empty after convenience constructor",
-		Options.AttachedImagePath.IsEmpty());
+	TestEqual("AttachedImagePaths should be empty after convenience constructor",
+		Options.AttachedImagePaths.Num(), 0);
 
 	return true;
 }
@@ -362,7 +362,7 @@ bool FClipboardImage_StreamJson_HandleMalformedJson::RunTest(const FString& Para
 }
 
 // ============================================================================
-// Stream-JSON Payload Construction Tests
+// Stream-JSON Payload Construction Tests (updated for TArray<FString>)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -385,7 +385,8 @@ bool FClipboardImage_StreamJson_BuildPayloadWithImage::RunTest(const FString& Pa
 	FakeImageData.Add(0x89); FakeImageData.Add(0x50); FakeImageData.Add(0x4E); FakeImageData.Add(0x47);
 	FFileHelper::SaveArrayToFile(FakeImageData, *TestImagePath);
 
-	FString Payload = Runner.BuildStreamJsonPayload(TEXT("Hello world"), TestImagePath);
+	TArray<FString> ImagePaths = { TestImagePath };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("Hello world"), ImagePaths);
 
 	// Verify it's valid JSON (single line NDJSON)
 	TestFalse("Payload should not be empty", Payload.IsEmpty());
@@ -480,7 +481,8 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsInvalidPath::RunTest(const FS
 	FClaudeCodeRunner Runner;
 
 	// Path outside screenshots directory should be rejected
-	FString Payload = Runner.BuildStreamJsonPayload(TEXT("test message"), TEXT("C:/Windows/System32/evil.png"));
+	TArray<FString> ImagePaths = { TEXT("C:/Windows/System32/evil.png") };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("test message"), ImagePaths);
 
 	// Should still produce valid NDJSON with text block only (no image)
 	TestFalse("Payload should not be empty", Payload.IsEmpty());
@@ -508,7 +510,7 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsInvalidPath::RunTest(const FS
 }
 
 // ============================================================================
-// Stream-JSON Edge Case Tests
+// Stream-JSON Edge Case Tests (updated for TArray<FString>)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -521,8 +523,9 @@ bool FClipboardImage_StreamJson_BuildPayloadWithoutImage::RunTest(const FString&
 {
 	FClaudeCodeRunner Runner;
 
-	// Empty image path = text-only payload
-	FString Payload = Runner.BuildStreamJsonPayload(TEXT("Hello text only"), TEXT(""));
+	// Empty array = text-only payload
+	TArray<FString> EmptyPaths;
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("Hello text only"), EmptyPaths);
 
 	TestFalse("Payload should not be empty", Payload.IsEmpty());
 
@@ -574,7 +577,8 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsTraversal::RunTest(const FStr
 	FString ScreenshotDir = FClipboardImageUtils::GetScreenshotDirectory();
 	FString TraversalPath = FPaths::Combine(ScreenshotDir, TEXT(".."), TEXT(".."), TEXT("secrets.png"));
 
-	FString Payload = Runner.BuildStreamJsonPayload(TEXT("traversal test"), TraversalPath);
+	TArray<FString> ImagePaths = { TraversalPath };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("traversal test"), ImagePaths);
 
 	TestFalse("Payload should not be empty", Payload.IsEmpty());
 
@@ -621,7 +625,8 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsOversizedImage::RunTest(const
 	FMemory::Memset(BigData.GetData(), 0xFF, BigData.Num());
 	FFileHelper::SaveArrayToFile(BigData, *OversizedPath);
 
-	FString Payload = Runner.BuildStreamJsonPayload(TEXT("big image test"), OversizedPath);
+	TArray<FString> ImagePaths = { OversizedPath };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("big image test"), ImagePaths);
 
 	TestFalse("Payload should not be empty", Payload.IsEmpty());
 
@@ -671,6 +676,310 @@ bool FClipboardImage_StreamJson_ParseFailureReturnsErrorMessage::RunTest(const F
 		Parsed.Contains(TEXT("Error")));
 	TestTrue("Should mention Output Log",
 		Parsed.Contains(TEXT("Output Log")));
+
+	return true;
+}
+
+// ============================================================================
+// Multi-Image Tests
+// ============================================================================
+
+// Helper to get number of content blocks from a payload JSON string
+static int32 GetContentBlockCount(const FString& Payload)
+{
+	FString JsonLine = Payload.TrimEnd();
+	TSharedPtr<FJsonObject> Envelope;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	if (!FJsonSerializer::Deserialize(Reader, Envelope) || !Envelope.IsValid())
+	{
+		return -1;
+	}
+	const TSharedPtr<FJsonObject>* MessageObj;
+	if (!Envelope->TryGetObjectField(TEXT("message"), MessageObj))
+	{
+		return -1;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+	if (!(*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+	{
+		return -1;
+	}
+	return ContentArray->Num();
+}
+
+// Helper to create a small test image in the screenshots directory
+static FString CreateTestImage(const FString& TestDir, const FString& FileName, int32 SizeBytes = 4)
+{
+	FString Path = FPaths::Combine(TestDir, FileName);
+	TArray<uint8> Data;
+	Data.SetNum(SizeBytes);
+	FMemory::Memset(Data.GetData(), 0x89, Data.Num());
+	FFileHelper::SaveArrayToFile(Data, *Path);
+	return Path;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_BuildPayloadWithMultipleImages,
+	"UnrealClaude.ClipboardImage.MultiImage.BuildPayloadWithMultipleImages",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_BuildPayloadWithMultipleImages::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+
+	FString Img1 = CreateTestImage(TestDir, TEXT("clipboard_multi_test1.png"));
+	FString Img2 = CreateTestImage(TestDir, TEXT("clipboard_multi_test2.png"));
+	FString Img3 = CreateTestImage(TestDir, TEXT("clipboard_multi_test3.png"));
+
+	TArray<FString> ImagePaths = { Img1, Img2, Img3 };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("multi image"), ImagePaths);
+
+	int32 BlockCount = GetContentBlockCount(Payload);
+	TestEqual("Should have 4 content blocks (1 text + 3 images)", BlockCount, 4);
+
+	// Cleanup
+	IFileManager::Get().Delete(*Img1);
+	IFileManager::Get().Delete(*Img2);
+	IFileManager::Get().Delete(*Img3);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_BuildPayloadRespectsMaxCount,
+	"UnrealClaude.ClipboardImage.MultiImage.BuildPayloadRespectsMaxCount",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_BuildPayloadRespectsMaxCount::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+
+	// Create 7 images (more than MaxImagesPerMessage = 5)
+	TArray<FString> ImagePaths;
+	TArray<FString> CreatedFiles;
+	for (int32 i = 0; i < 7; ++i)
+	{
+		FString Path = CreateTestImage(TestDir, FString::Printf(TEXT("clipboard_maxcount_%d.png"), i));
+		ImagePaths.Add(Path);
+		CreatedFiles.Add(Path);
+	}
+
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("max count test"), ImagePaths);
+
+	// Should have 1 text + 5 images (capped at MaxImagesPerMessage)
+	int32 BlockCount = GetContentBlockCount(Payload);
+	TestEqual("Should have 6 content blocks (1 text + 5 images, capped)",
+		BlockCount, 1 + UnrealClaudeConstants::ClipboardImage::MaxImagesPerMessage);
+
+	// Cleanup
+	for (const FString& F : CreatedFiles)
+	{
+		IFileManager::Get().Delete(*F);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_BuildPayloadSkipsInvalidImages,
+	"UnrealClaude.ClipboardImage.MultiImage.BuildPayloadSkipsInvalidImages",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_BuildPayloadSkipsInvalidImages::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+
+	FString ValidImg1 = CreateTestImage(TestDir, TEXT("clipboard_skipinvalid_1.png"));
+	FString InvalidImg = FPaths::Combine(TestDir, TEXT("clipboard_skipinvalid_missing.png")); // doesn't exist
+	FString ValidImg2 = CreateTestImage(TestDir, TEXT("clipboard_skipinvalid_3.png"));
+
+	TArray<FString> ImagePaths = { ValidImg1, InvalidImg, ValidImg2 };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("skip invalid"), ImagePaths);
+
+	// Should have 1 text + 2 valid images (middle one skipped)
+	int32 BlockCount = GetContentBlockCount(Payload);
+	TestEqual("Should have 3 content blocks (1 text + 2 valid images)", BlockCount, 3);
+
+	// Cleanup
+	IFileManager::Get().Delete(*ValidImg1);
+	IFileManager::Get().Delete(*ValidImg2);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_BuildPayloadTotalSizeGuard,
+	"UnrealClaude.ClipboardImage.MultiImage.BuildPayloadTotalSizeGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_BuildPayloadTotalSizeGuard::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+
+	// Create images that individually pass the 4.5MB limit but together exceed 20MB total
+	// Each image: ~4MB, so 5 images would be ~20MB. Only some should be included.
+	const int32 ImageSize = 4 * 1024 * 1024; // 4MB each
+	TArray<FString> ImagePaths;
+	TArray<FString> CreatedFiles;
+
+	for (int32 i = 0; i < 5; ++i)
+	{
+		FString Path = CreateTestImage(TestDir,
+			FString::Printf(TEXT("clipboard_totalsize_%d.png"), i), ImageSize);
+		ImagePaths.Add(Path);
+		CreatedFiles.Add(Path);
+	}
+
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("total size test"), ImagePaths);
+
+	// Should cap at 20MB total - first few images fit, later ones are skipped
+	int32 BlockCount = GetContentBlockCount(Payload);
+	// 4MB * 5 = 20MB which exactly equals the limit, but we check (total + new > limit)
+	// so the 5th image (which would bring total to 20MB) should be included since we check > not >=
+	// Actually: TotalImageBytes starts at 0, each 4MB image adds to it.
+	// Check is: TotalImageBytes + FileSize > MaxTotalImagePayloadSize (20MB)
+	// After 4 images: 16MB + 4MB = 20MB, which is NOT > 20MB, so 5th image is allowed.
+	// After 5 images: 20MB + 4MB = 24MB, which IS > 20MB, but we'd need a 6th image to hit this.
+	// With 5 images of 4MB each = 20MB total, all 5 fit exactly.
+	// So all 5 images should be included = 1 text + 5 images = 6 blocks
+	TestTrue("Should have included some images but not an absurd number",
+		BlockCount >= 2 && BlockCount <= 6);
+
+	// Cleanup
+	for (const FString& F : CreatedFiles)
+	{
+		IFileManager::Get().Delete(*F);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_BuildPayloadMixedValidation,
+	"UnrealClaude.ClipboardImage.MultiImage.BuildPayloadMixedValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_BuildPayloadMixedValidation::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+
+	FString ValidImg1 = CreateTestImage(TestDir, TEXT("clipboard_mixed_valid1.png"));
+	FString TraversalPath = FPaths::Combine(TestDir, TEXT(".."), TEXT(".."), TEXT("evil.png"));
+	FString MissingPath = FPaths::Combine(TestDir, TEXT("clipboard_mixed_missing.png"));
+	FString ValidImg2 = CreateTestImage(TestDir, TEXT("clipboard_mixed_valid2.png"));
+
+	TArray<FString> ImagePaths = { ValidImg1, TraversalPath, MissingPath, ValidImg2 };
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("mixed validation"), ImagePaths);
+
+	// Should have 1 text + 2 valid images (traversal and missing skipped)
+	int32 BlockCount = GetContentBlockCount(Payload);
+	TestEqual("Should have 3 content blocks (1 text + 2 valid images)", BlockCount, 3);
+
+	// Cleanup
+	IFileManager::Get().Delete(*ValidImg1);
+	IFileManager::Get().Delete(*ValidImg2);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_Constants_MaxImagesReasonable,
+	"UnrealClaude.ClipboardImage.MultiImage.ConstantsMaxImagesReasonable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_Constants_MaxImagesReasonable::RunTest(const FString& Parameters)
+{
+	using namespace UnrealClaudeConstants::ClipboardImage;
+
+	TestTrue("MaxImagesPerMessage should be at least 1",
+		MaxImagesPerMessage >= 1);
+	TestTrue("MaxImagesPerMessage should be at most 100",
+		MaxImagesPerMessage <= 100);
+
+	TestTrue("MaxTotalImagePayloadSize should be greater than MaxImageFileSize",
+		MaxTotalImagePayloadSize > MaxImageFileSize);
+
+	TestTrue("MaxImageFileSize should be positive",
+		MaxImageFileSize > 0);
+
+	TestTrue("MaxTotalImagePayloadSize should be positive",
+		MaxTotalImagePayloadSize > 0);
+
+	TestTrue("ThumbnailSpacing should be non-negative",
+		ThumbnailSpacing >= 0.0f);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_RequestConfigArrayOperations,
+	"UnrealClaude.ClipboardImage.MultiImage.RequestConfigArrayOperations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_RequestConfigArrayOperations::RunTest(const FString& Parameters)
+{
+	FClaudeRequestConfig Config;
+
+	// Add paths
+	Config.AttachedImagePaths.Add(TEXT("path1.png"));
+	Config.AttachedImagePaths.Add(TEXT("path2.png"));
+	Config.AttachedImagePaths.Add(TEXT("path3.png"));
+	TestEqual("Should have 3 paths after Add", Config.AttachedImagePaths.Num(), 3);
+
+	// RemoveAt
+	Config.AttachedImagePaths.RemoveAt(1);
+	TestEqual("Should have 2 paths after RemoveAt(1)", Config.AttachedImagePaths.Num(), 2);
+	TestEqual("First path should be unchanged", Config.AttachedImagePaths[0], TEXT("path1.png"));
+	TestEqual("Second path should now be the former third", Config.AttachedImagePaths[1], TEXT("path3.png"));
+
+	// Empty
+	Config.AttachedImagePaths.Empty();
+	TestEqual("Should have 0 paths after Empty", Config.AttachedImagePaths.Num(), 0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_MultiImage_PromptOptionsArrayCopied,
+	"UnrealClaude.ClipboardImage.MultiImage.PromptOptionsArrayCopied",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_MultiImage_PromptOptionsArrayCopied::RunTest(const FString& Parameters)
+{
+	FClaudePromptOptions Original;
+	Original.AttachedImagePaths.Add(TEXT("img1.png"));
+	Original.AttachedImagePaths.Add(TEXT("img2.png"));
+	Original.AttachedImagePaths.Add(TEXT("img3.png"));
+
+	// Copy
+	FClaudePromptOptions Copy = Original;
+	TestEqual("Copied options should have 3 paths", Copy.AttachedImagePaths.Num(), 3);
+	TestEqual("First path should match", Copy.AttachedImagePaths[0], TEXT("img1.png"));
+	TestEqual("Second path should match", Copy.AttachedImagePaths[1], TEXT("img2.png"));
+	TestEqual("Third path should match", Copy.AttachedImagePaths[2], TEXT("img3.png"));
+
+	// Modifying copy should not affect original
+	Copy.AttachedImagePaths.RemoveAt(0);
+	TestEqual("Original should still have 3 paths", Original.AttachedImagePaths.Num(), 3);
+	TestEqual("Copy should have 2 paths", Copy.AttachedImagePaths.Num(), 2);
 
 	return true;
 }

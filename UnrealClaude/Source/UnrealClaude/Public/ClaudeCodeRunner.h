@@ -43,7 +43,7 @@ public:
 	virtual void Exit() override;
 
 	/** Build stream-json NDJSON payload with text + base64 image content blocks */
-	FString BuildStreamJsonPayload(const FString& TextPrompt, const FString& ImagePath);
+	FString BuildStreamJsonPayload(const FString& TextPrompt, const TArray<FString>& ImagePaths);
 
 	/** Parse stream-json NDJSON output to extract the response text */
 	FString ParseStreamJsonOutput(const FString& RawOutput);

@@ -396,7 +396,7 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 	}
 
 	// JSON output if requested (but not when image attached -- stream-json overrides)
-	if (Config.bUseJsonOutput && Config.AttachedImagePath.IsEmpty())
+	if (Config.bUseJsonOutput && Config.AttachedImagePaths.Num() == 0)
 	{
 		CommandLine += TEXT("--output-format json ");
 	}
@@ -447,9 +447,9 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += FString::Printf(TEXT("--allowedTools \"%s\" "), *FString::Join(AllTools, TEXT(",")));
 	}
 
-	// Use stream-json input/output format when image is attached (required for multimodal content)
+	// Use stream-json input/output format when images are attached (required for multimodal content)
 	// Claude CLI requires both input and output to use stream-json together
-	if (!Config.AttachedImagePath.IsEmpty())
+	if (Config.AttachedImagePaths.Num() > 0)
 	{
 		CommandLine += TEXT("--input-format stream-json --output-format stream-json ");
 	}
@@ -481,60 +481,13 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 	return CommandLine;
 }
 
-FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, const FString& ImagePath)
+FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, const TArray<FString>& ImagePaths)
 {
-	// Maximum image file size (bytes) before base64 encoding
-	// Claude API accepts up to 5MB images; base64 adds ~33% overhead
-	constexpr int64 MaxImageFileSize = 4608 * 1024; // 4.5 MB (Claude API limit is 5 MB)
+	using namespace UnrealClaudeConstants::ClipboardImage;
 
-	bool bImageValid = false;
-	FString Base64ImageData;
-
-	if (!ImagePath.IsEmpty())
-	{
-		FString ExpectedDir = FPaths::ConvertRelativePathToFull(
-			FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("screenshots")));
-		FString FullImagePath = FPaths::ConvertRelativePathToFull(ImagePath);
-
-		if (FullImagePath.Contains(TEXT("..")))
-		{
-			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path with traversal: %s"), *FullImagePath);
-		}
-		else if (!FullImagePath.StartsWith(ExpectedDir))
-		{
-			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
-		}
-		else if (!FPaths::FileExists(FullImagePath))
-		{
-			UE_LOG(LogUnrealClaude, Warning, TEXT("Attached image file no longer exists: %s"), *FullImagePath);
-		}
-		else
-		{
-			// Check file size before loading
-			const int64 FileSize = IFileManager::Get().FileSize(*FullImagePath);
-			if (FileSize > MaxImageFileSize)
-			{
-				UE_LOG(LogUnrealClaude, Warning, TEXT("Image file too large for base64 encoding: %s (%lld bytes, max %lld)"),
-					*FullImagePath, FileSize, MaxImageFileSize);
-			}
-			else
-			{
-				// Load and base64 encode the PNG
-				TArray<uint8> ImageData;
-				if (FFileHelper::LoadFileToArray(ImageData, *FullImagePath))
-				{
-					Base64ImageData = FBase64::Encode(ImageData);
-					bImageValid = true;
-					UE_LOG(LogUnrealClaude, Log, TEXT("Base64 encoded image: %s (%d bytes -> %d chars)"),
-						*FullImagePath, ImageData.Num(), Base64ImageData.Len());
-				}
-				else
-				{
-					UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image file for base64 encoding: %s"), *FullImagePath);
-				}
-			}
-		}
-	}
+	// Pre-compute expected directory once for all images
+	FString ExpectedDir = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("screenshots")));
 
 	// Build content blocks array
 	TArray<TSharedPtr<FJsonValue>> ContentArray;
@@ -548,9 +501,65 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 		ContentArray.Add(MakeShared<FJsonValueObject>(TextBlock));
 	}
 
-	// Image content block (base64-encoded PNG)
-	if (bImageValid)
+	// Image content blocks (base64-encoded PNGs)
+	int32 EncodedCount = 0;
+	int64 TotalImageBytes = 0;
+	const int32 MaxCount = FMath::Min(ImagePaths.Num(), MaxImagesPerMessage);
+
+	for (int32 i = 0; i < MaxCount; ++i)
 	{
+		const FString& ImagePath = ImagePaths[i];
+		if (ImagePath.IsEmpty())
+		{
+			continue;
+		}
+
+		FString FullImagePath = FPaths::ConvertRelativePathToFull(ImagePath);
+
+		if (FullImagePath.Contains(TEXT("..")))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path with traversal: %s"), *FullImagePath);
+			continue;
+		}
+		if (!FullImagePath.StartsWith(ExpectedDir))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
+			continue;
+		}
+		if (!FPaths::FileExists(FullImagePath))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Attached image file no longer exists: %s"), *FullImagePath);
+			continue;
+		}
+
+		// Check per-file size
+		const int64 FileSize = IFileManager::Get().FileSize(*FullImagePath);
+		if (FileSize > MaxImageFileSize)
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Image file too large for base64 encoding: %s (%lld bytes, max %lld)"),
+				*FullImagePath, FileSize, MaxImageFileSize);
+			continue;
+		}
+
+		// Check total payload size
+		if (TotalImageBytes + FileSize > MaxTotalImagePayloadSize)
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Skipping image (total payload would exceed %lld bytes): %s"),
+				MaxTotalImagePayloadSize, *FullImagePath);
+			continue;
+		}
+
+		// Load and base64 encode the PNG
+		TArray<uint8> ImageData;
+		if (!FFileHelper::LoadFileToArray(ImageData, *FullImagePath))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image file for base64 encoding: %s"), *FullImagePath);
+			continue;
+		}
+
+		FString Base64ImageData = FBase64::Encode(ImageData);
+		TotalImageBytes += FileSize;
+
 		TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
 		Source->SetStringField(TEXT("type"), TEXT("base64"));
 		Source->SetStringField(TEXT("media_type"), TEXT("image/png"));
@@ -560,6 +569,15 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 		ImageBlock->SetStringField(TEXT("type"), TEXT("image"));
 		ImageBlock->SetObjectField(TEXT("source"), Source);
 		ContentArray.Add(MakeShared<FJsonValueObject>(ImageBlock));
+
+		EncodedCount++;
+		UE_LOG(LogUnrealClaude, Log, TEXT("Base64 encoded image [%d]: %s (%d bytes -> %d chars)"),
+			EncodedCount, *FullImagePath, ImageData.Num(), Base64ImageData.Len());
+	}
+
+	if (EncodedCount > 0)
+	{
+		UE_LOG(LogUnrealClaude, Log, TEXT("Encoded %d image(s), total %lld bytes"), EncodedCount, TotalImageBytes);
 	}
 
 	// Build the inner message object: {"role":"user","content":[...]}
@@ -582,8 +600,8 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 	// NDJSON requires newline termination
 	JsonLine += TEXT("\n");
 
-	UE_LOG(LogUnrealClaude, Log, TEXT("Built stream-json payload: %d chars (image: %s)"),
-		JsonLine.Len(), bImageValid ? TEXT("yes") : TEXT("no"));
+	UE_LOG(LogUnrealClaude, Log, TEXT("Built stream-json payload: %d chars (images: %d)"),
+		JsonLine.Len(), EncodedCount);
 
 	return JsonLine;
 }
@@ -853,7 +871,7 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 
 	// When using stream-json (image attachment), suppress progress callbacks since
 	// the raw output is NDJSON that must be parsed before display
-	bool bSuppressProgress = !CurrentConfig.AttachedImagePath.IsEmpty();
+	bool bSuppressProgress = CurrentConfig.AttachedImagePaths.Num() > 0;
 
 	while (!StopTaskCounter.GetValue())
 	{
@@ -990,7 +1008,7 @@ void FClaudeCodeRunner::ExecuteProcess()
 	if (StdInWrite)
 	{
 		FString StdinPayload;
-		bool bHasImageAttachment = !CurrentConfig.AttachedImagePath.IsEmpty();
+		bool bHasImageAttachment = CurrentConfig.AttachedImagePaths.Num() > 0;
 
 		// Build the text portion of the prompt (system context + user message)
 		FString TextPrompt;
@@ -1013,8 +1031,8 @@ void FClaudeCodeRunner::ExecuteProcess()
 
 		if (bHasImageAttachment)
 		{
-			// Stream-json mode: build NDJSON with multimodal content blocks (text + base64 image)
-			StdinPayload = BuildStreamJsonPayload(TextPrompt, CurrentConfig.AttachedImagePath);
+			// Stream-json mode: build NDJSON with multimodal content blocks (text + base64 images)
+			StdinPayload = BuildStreamJsonPayload(TextPrompt, CurrentConfig.AttachedImagePaths);
 		}
 		else
 		{
@@ -1047,7 +1065,7 @@ void FClaudeCodeRunner::ExecuteProcess()
 	FString FullOutput = ReadProcessOutput();
 
 	// If stream-json output was used (image attachment), parse NDJSON to extract text
-	if (!CurrentConfig.AttachedImagePath.IsEmpty())
+	if (CurrentConfig.AttachedImagePaths.Num() > 0)
 	{
 		FullOutput = ParseStreamJsonOutput(FullOutput);
 	}

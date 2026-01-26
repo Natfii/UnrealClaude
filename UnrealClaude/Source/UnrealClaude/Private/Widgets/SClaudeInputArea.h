@@ -9,16 +9,15 @@
 
 class SMultiLineEditableTextBox;
 class SHorizontalBox;
-class STextBlock;
-class SImage;
+class SScrollBox;
 
 DECLARE_DELEGATE(FOnInputAction)
 DECLARE_DELEGATE_OneParam(FOnTextChangedEvent, const FString&)
-DECLARE_DELEGATE_OneParam(FOnImageAttached, const FString&)
+DECLARE_DELEGATE_OneParam(FOnImagesChanged, const TArray<FString>&)
 
 /**
  * Input area widget for Claude Editor
- * Handles multi-line text input with paste, send/cancel buttons, and image attachment
+ * Handles multi-line text input with paste, send/cancel buttons, and multi-image attachment
  */
 class SClaudeInputArea : public SCompoundWidget
 {
@@ -30,8 +29,7 @@ public:
 		SLATE_EVENT(FOnInputAction, OnSend)
 		SLATE_EVENT(FOnInputAction, OnCancel)
 		SLATE_EVENT(FOnTextChangedEvent, OnTextChanged)
-		SLATE_EVENT(FOnImageAttached, OnImageAttached)
-		SLATE_EVENT(FOnInputAction, OnImageRemoved)
+		SLATE_EVENT(FOnImagesChanged, OnImagesChanged)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -45,14 +43,20 @@ public:
 	/** Clear the input */
 	void ClearText();
 
-	/** Check if an image is currently attached */
-	bool HasAttachedImage() const;
+	/** Check if any images are currently attached */
+	bool HasAttachedImages() const;
 
-	/** Get the attached image file path */
-	FString GetAttachedImagePath() const;
+	/** Get the number of attached images */
+	int32 GetAttachedImageCount() const;
 
-	/** Clear the attached image */
-	void ClearAttachedImage();
+	/** Get all attached image file paths */
+	TArray<FString> GetAttachedImagePaths() const;
+
+	/** Clear all attached images */
+	void ClearAttachedImages();
+
+	/** Remove a specific attached image by index */
+	void RemoveAttachedImage(int32 Index);
 
 private:
 	/** Handle key down in input box */
@@ -73,14 +77,11 @@ private:
 	/** Try to paste an image from clipboard. Returns true if image was found and attached. */
 	bool TryPasteImageFromClipboard();
 
-	/** Handle remove image button click */
-	FReply HandleRemoveImageClicked();
+	/** Handle remove image button click for a specific index */
+	FReply HandleRemoveImageClicked(int32 Index);
 
-	/** Show the image preview row with thumbnail loaded from the saved PNG */
-	void ShowImagePreview(const FString& FilePath);
-
-	/** Hide the image preview row and release thumbnail brush */
-	void HideImagePreview();
+	/** Rebuild the horizontal thumbnail strip from current attached images */
+	void RebuildImagePreviewStrip();
 
 	/** Create a dynamic image brush from a PNG file on disk */
 	TSharedPtr<FSlateDynamicImageBrush> CreateThumbnailBrush(const FString& FilePath) const;
@@ -89,25 +90,18 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> InputTextBox;
 	FString CurrentInputText;
 
-	/** Attached image file path */
-	FString AttachedImagePath;
+	/** Attached image file paths (up to MaxImagesPerMessage) */
+	TArray<FString> AttachedImagePaths;
 
-	/** Image preview row (collapsed when no image) */
-	TSharedPtr<SHorizontalBox> ImagePreviewRow;
+	/** Horizontal thumbnail strip container */
+	TSharedPtr<SHorizontalBox> ImagePreviewStrip;
 
-	/** Image file name display */
-	TSharedPtr<STextBlock> ImageFileNameText;
-
-	/** Thumbnail image widget */
-	TSharedPtr<SImage> ThumbnailImage;
-
-	/** Dynamic brush for the thumbnail (must outlive the SImage) */
-	TSharedPtr<FSlateDynamicImageBrush> ThumbnailBrush;
+	/** Dynamic brushes for thumbnails (must outlive the SImage widgets) */
+	TArray<TSharedPtr<FSlateDynamicImageBrush>> ThumbnailBrushes;
 
 	TAttribute<bool> bIsWaiting;
 	FOnInputAction OnSend;
 	FOnInputAction OnCancel;
 	FOnTextChangedEvent OnTextChangedDelegate;
-	FOnImageAttached OnImageAttachedDelegate;
-	FOnInputAction OnImageRemovedDelegate;
+	FOnImagesChanged OnImagesChangedDelegate;
 };

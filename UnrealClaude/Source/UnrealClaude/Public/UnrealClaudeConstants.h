@@ -207,5 +207,17 @@ namespace UnrealClaudeConstants
 
 		/** Thumbnail preview size in the input area (pixels) */
 		constexpr float ThumbnailSize = 64.0f;
+
+		/** Maximum number of images that can be attached to a single message */
+		constexpr int32 MaxImagesPerMessage = 5;
+
+		/** Maximum file size per image in bytes (4.5 MB; Claude API limit is 5 MB) */
+		constexpr int64 MaxImageFileSize = 4608 * 1024;
+
+		/** Maximum total image payload size in bytes (20 MB) */
+		constexpr int64 MaxTotalImagePayloadSize = 20 * 1024 * 1024;
+
+		/** Spacing between thumbnail previews in the image strip (pixels) */
+		constexpr float ThumbnailSpacing = 4.0f;
 	}
 }

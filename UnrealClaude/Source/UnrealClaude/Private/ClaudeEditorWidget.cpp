@@ -256,15 +256,15 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 
 void SClaudeEditorWidget::SendMessage()
 {
-	// Extract image path before checking emptiness
-	FString ImagePath;
+	// Extract image paths before checking emptiness
+	TArray<FString> ImagePaths;
 	if (InputArea.IsValid())
 	{
-		ImagePath = InputArea->GetAttachedImagePath();
+		ImagePaths = InputArea->GetAttachedImagePaths();
 	}
 
 	bool bHasText = !CurrentInputText.IsEmpty();
-	bool bHasImage = !ImagePath.IsEmpty();
+	bool bHasImage = ImagePaths.Num() > 0;
 
 	if ((!bHasText && !bHasImage) || bIsWaitingForResponse)
 	{
@@ -281,14 +281,28 @@ void SClaudeEditorWidget::SendMessage()
 	FString DisplayMessage = bHasText ? CurrentInputText : FString();
 	if (bHasImage)
 	{
-		FString FileName = FPaths::GetCleanFilename(ImagePath);
-		if (bHasText)
+		FString ImageLabel;
+		if (ImagePaths.Num() == 1)
 		{
-			DisplayMessage += FString::Printf(TEXT("\n[Attached image: %s]"), *FileName);
+			ImageLabel = FString::Printf(TEXT("[Attached image: %s]"), *FPaths::GetCleanFilename(ImagePaths[0]));
 		}
 		else
 		{
-			DisplayMessage = FString::Printf(TEXT("[Attached image: %s]"), *FileName);
+			TArray<FString> FileNames;
+			for (const FString& Path : ImagePaths)
+			{
+				FileNames.Add(FPaths::GetCleanFilename(Path));
+			}
+			ImageLabel = FString::Printf(TEXT("[Attached %d images: %s]"), ImagePaths.Num(), *FString::Join(FileNames, TEXT(" ")));
+		}
+
+		if (bHasText)
+		{
+			DisplayMessage += TEXT("\n") + ImageLabel;
+		}
+		else
+		{
+			DisplayMessage = ImageLabel;
 		}
 	}
 
@@ -319,7 +333,7 @@ void SClaudeEditorWidget::SendMessage()
 	Options.bIncludeEngineContext = bIncludeUE57Context;
 	Options.bIncludeProjectContext = bIncludeProjectContext;
 	Options.OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
-	Options.AttachedImagePath = ImagePath;
+	Options.AttachedImagePaths = ImagePaths;
 
 	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, Options);
 }

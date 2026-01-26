@@ -84,7 +84,7 @@ void FClaudeCodeSubsystem::SendPrompt(
 	Config.bSkipPermissions = true;
 	Config.AllowedTools = { TEXT("Read"), TEXT("Write"), TEXT("Edit"), TEXT("Grep"), TEXT("Glob"), TEXT("Bash") };
 
-	Config.AttachedImagePath = Options.AttachedImagePath;
+	Config.AttachedImagePaths = Options.AttachedImagePaths;
 
 	if (Options.bIncludeEngineContext)
 	{

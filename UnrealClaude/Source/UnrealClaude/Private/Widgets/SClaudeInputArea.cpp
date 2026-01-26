@@ -12,6 +12,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Styling/AppStyle.h"
 #include "Brushes/SlateDynamicImageBrush.h"
 #include "HAL/PlatformApplicationMisc.h"
@@ -27,69 +28,24 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 	OnSend = InArgs._OnSend;
 	OnCancel = InArgs._OnCancel;
 	OnTextChangedDelegate = InArgs._OnTextChanged;
-	OnImageAttachedDelegate = InArgs._OnImageAttached;
-	OnImageRemovedDelegate = InArgs._OnImageRemoved;
+	OnImagesChangedDelegate = InArgs._OnImagesChanged;
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
 
-		// Image preview row (starts collapsed)
+		// Image preview strip (starts collapsed, horizontal scroll)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 4.0f)
 		[
-			SAssignNew(ImagePreviewRow, SHorizontalBox)
+			SAssignNew(ImagePreviewStrip, SHorizontalBox)
 			.Visibility(EVisibility::Collapsed)
-
-			// Image thumbnail
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SBox)
-				.WidthOverride(UnrealClaudeConstants::ClipboardImage::ThumbnailSize)
-				.HeightOverride(UnrealClaudeConstants::ClipboardImage::ThumbnailSize)
-				[
-					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.HAlign(HAlign_Fill)
-					.VAlign(VAlign_Fill)
-					[
-						SAssignNew(ThumbnailImage, SImage)
-					]
-				]
-			]
-
-			// File name label
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			.VAlign(VAlign_Center)
-			[
-				SAssignNew(ImageFileNameText, STextBlock)
-				.TextStyle(FAppStyle::Get(), "SmallText")
-				.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
-			]
-
-			// Remove button
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(SButton)
-				.Text(LOCTEXT("RemoveImage", "X"))
-				.OnClicked(this, &SClaudeInputArea::HandleRemoveImageClicked)
-				.ToolTipText(LOCTEXT("RemoveImageTip", "Remove attached image"))
-				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			]
 		]
 
 		// Input row
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.MaxHeight(300.0f)
 		[
 			SNew(SHorizontalBox)
 
@@ -192,23 +148,40 @@ void SClaudeInputArea::ClearText()
 	{
 		InputTextBox->SetText(FText::GetEmpty());
 	}
-	ClearAttachedImage();
+	ClearAttachedImages();
 }
 
-bool SClaudeInputArea::HasAttachedImage() const
+bool SClaudeInputArea::HasAttachedImages() const
 {
-	return !AttachedImagePath.IsEmpty();
+	return AttachedImagePaths.Num() > 0;
 }
 
-FString SClaudeInputArea::GetAttachedImagePath() const
+int32 SClaudeInputArea::GetAttachedImageCount() const
 {
-	return AttachedImagePath;
+	return AttachedImagePaths.Num();
 }
 
-void SClaudeInputArea::ClearAttachedImage()
+TArray<FString> SClaudeInputArea::GetAttachedImagePaths() const
 {
-	AttachedImagePath.Empty();
-	HideImagePreview();
+	return AttachedImagePaths;
+}
+
+void SClaudeInputArea::ClearAttachedImages()
+{
+	AttachedImagePaths.Empty();
+	ThumbnailBrushes.Empty();
+	RebuildImagePreviewStrip();
+}
+
+void SClaudeInputArea::RemoveAttachedImage(int32 Index)
+{
+	if (AttachedImagePaths.IsValidIndex(Index))
+	{
+		AttachedImagePaths.RemoveAt(Index);
+		ThumbnailBrushes.RemoveAt(Index);
+		RebuildImagePreviewStrip();
+		OnImagesChangedDelegate.ExecuteIfBound(AttachedImagePaths);
+	}
 }
 
 FReply SClaudeInputArea::OnInputKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
@@ -284,8 +257,17 @@ FReply SClaudeInputArea::HandleSendCancelClicked()
 
 bool SClaudeInputArea::TryPasteImageFromClipboard()
 {
+	using namespace UnrealClaudeConstants::ClipboardImage;
+
 	if (!FClipboardImageUtils::ClipboardHasImage())
 	{
+		return false;
+	}
+
+	// Reject if at max image count
+	if (AttachedImagePaths.Num() >= MaxImagesPerMessage)
+	{
+		UE_LOG(LogUnrealClaude, Log, TEXT("Image paste rejected: already at max (%d images)"), MaxImagesPerMessage);
 		return false;
 	}
 
@@ -301,56 +283,101 @@ bool SClaudeInputArea::TryPasteImageFromClipboard()
 		return false;
 	}
 
-	AttachedImagePath = SavedPath;
-	ShowImagePreview(SavedPath);
+	AttachedImagePaths.Add(SavedPath);
+	ThumbnailBrushes.Add(CreateThumbnailBrush(SavedPath));
+	RebuildImagePreviewStrip();
 
-	OnImageAttachedDelegate.ExecuteIfBound(AttachedImagePath);
+	OnImagesChangedDelegate.ExecuteIfBound(AttachedImagePaths);
 	return true;
 }
 
-FReply SClaudeInputArea::HandleRemoveImageClicked()
+FReply SClaudeInputArea::HandleRemoveImageClicked(int32 Index)
 {
-	ClearAttachedImage();
-	OnImageRemovedDelegate.ExecuteIfBound();
+	RemoveAttachedImage(Index);
 	return FReply::Handled();
 }
 
-void SClaudeInputArea::ShowImagePreview(const FString& FilePath)
+void SClaudeInputArea::RebuildImagePreviewStrip()
 {
-	// Try to create a thumbnail brush from the saved PNG
-	ThumbnailBrush = CreateThumbnailBrush(FilePath);
-	if (ThumbnailBrush.IsValid() && ThumbnailImage.IsValid())
+	using namespace UnrealClaudeConstants::ClipboardImage;
+
+	if (!ImagePreviewStrip.IsValid())
 	{
-		ThumbnailImage->SetImage(ThumbnailBrush.Get());
+		return;
 	}
 
-	if (ImagePreviewRow.IsValid())
-	{
-		ImagePreviewRow->SetVisibility(EVisibility::Visible);
-	}
-	if (ImageFileNameText.IsValid())
-	{
-		ImageFileNameText->SetText(FText::FromString(FPaths::GetCleanFilename(FilePath)));
-	}
-}
+	ImagePreviewStrip->ClearChildren();
 
-void SClaudeInputArea::HideImagePreview()
-{
-	// Release the thumbnail brush
-	if (ThumbnailImage.IsValid())
+	if (AttachedImagePaths.Num() == 0)
 	{
-		ThumbnailImage->SetImage(nullptr);
+		ImagePreviewStrip->SetVisibility(EVisibility::Collapsed);
+		return;
 	}
-	ThumbnailBrush.Reset();
 
-	if (ImagePreviewRow.IsValid())
+	ImagePreviewStrip->SetVisibility(EVisibility::Visible);
+
+	// Add a thumbnail slot for each attached image
+	for (int32 i = 0; i < AttachedImagePaths.Num(); ++i)
 	{
-		ImagePreviewRow->SetVisibility(EVisibility::Collapsed);
+		const FString& ImagePath = AttachedImagePaths[i];
+		FString FileName = FPaths::GetCleanFilename(ImagePath);
+
+		ImagePreviewStrip->AddSlot()
+		.AutoWidth()
+		.Padding(i > 0 ? ThumbnailSpacing : 0.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SBox)
+			.WidthOverride(ThumbnailSize)
+			.HeightOverride(ThumbnailSize)
+			.ToolTipText(FText::FromString(FileName))
+			[
+				SNew(SOverlay)
+
+				// Layer 0: thumbnail image
+				+ SOverlay::Slot()
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.HAlign(HAlign_Fill)
+					.VAlign(VAlign_Fill)
+					[
+						SNew(SImage)
+						.Image(ThumbnailBrushes.IsValidIndex(i) && ThumbnailBrushes[i].IsValid()
+							? ThumbnailBrushes[i].Get() : nullptr)
+					]
+				]
+
+				// Layer 1: remove button (top-right)
+				+ SOverlay::Slot()
+				.HAlign(HAlign_Right)
+				.VAlign(VAlign_Top)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("RemoveImageX", "X"))
+					.OnClicked_Lambda([this, Index = i]()
+					{
+						return HandleRemoveImageClicked(Index);
+					})
+					.ToolTipText(LOCTEXT("RemoveImageTip", "Remove this image"))
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				]
+			]
+		];
 	}
-	if (ImageFileNameText.IsValid())
-	{
-		ImageFileNameText->SetText(FText::GetEmpty());
-	}
+
+	// Add count label after thumbnails
+	ImagePreviewStrip->AddSlot()
+	.AutoWidth()
+	.VAlign(VAlign_Center)
+	.Padding(ThumbnailSpacing, 0.0f, 0.0f, 0.0f)
+	[
+		SNew(STextBlock)
+		.Text(FText::Format(LOCTEXT("ImageCount", "{0}/{1}"),
+			FText::AsNumber(AttachedImagePaths.Num()),
+			FText::AsNumber(MaxImagesPerMessage)))
+		.TextStyle(FAppStyle::Get(), "SmallText")
+		.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+	];
 }
 
 TSharedPtr<FSlateDynamicImageBrush> SClaudeInputArea::CreateThumbnailBrush(const FString& FilePath) const
