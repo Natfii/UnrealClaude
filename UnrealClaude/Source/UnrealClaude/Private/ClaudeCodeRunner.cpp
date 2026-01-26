@@ -485,7 +485,7 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 {
 	// Maximum image file size (bytes) before base64 encoding
 	// Claude API accepts up to 5MB images; base64 adds ~33% overhead
-	constexpr int64 MaxImageFileSize = 10 * 1024 * 1024; // 10 MB
+	constexpr int64 MaxImageFileSize = 4608 * 1024; // 4.5 MB (Claude API limit is 5 MB)
 
 	bool bImageValid = false;
 	FString Base64ImageData;

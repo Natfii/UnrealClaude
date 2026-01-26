@@ -610,14 +610,14 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsOversizedImage::RunTest(const
 {
 	FClaudeCodeRunner Runner;
 
-	// Create a file larger than 10MB in the screenshots directory
+	// Create a file larger than 4.5MB in the screenshots directory
 	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
 	IFileManager::Get().MakeDirectory(*TestDir, true);
 	FString OversizedPath = FPaths::Combine(TestDir, TEXT("clipboard_test_oversized.png"));
 
-	// Write ~11MB of data
+	// Write ~5MB of data (exceeds 4.5MB limit)
 	TArray<uint8> BigData;
-	BigData.SetNum(11 * 1024 * 1024);
+	BigData.SetNum(5 * 1024 * 1024);
 	FMemory::Memset(BigData.GetData(), 0xFF, BigData.Num());
 	FFileHelper::SaveArrayToFile(BigData, *OversizedPath);
 
