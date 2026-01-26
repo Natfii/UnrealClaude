@@ -122,17 +122,43 @@ FMCPToolResult FMCPTool_ExecuteScript::ExecuteSync(const TSharedRef<FJsonObject>
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("script_type"), ScriptTypeStr);
 	ResultData->SetStringField(TEXT("description"), Description);
-	ResultData->SetStringField(TEXT("output"), Result.Output);
 	ResultData->SetNumberField(TEXT("retry_count"), Result.RetryCount);
+
+	// Add compile_status for C++ scripts
+	if (ScriptTypeStr.ToLower() == TEXT("cpp"))
+	{
+		ResultData->SetStringField(TEXT("compile_status"),
+			Result.bSuccess ? TEXT("success") : TEXT("failed"));
+	}
 
 	if (Result.bSuccess)
 	{
+		ResultData->SetStringField(TEXT("output"), Result.Output);
 		return FMCPToolResult::Success(Result.Message, ResultData);
 	}
 	else
 	{
-		// Include error output for Claude to fix
+		// Always include full output so errors aren't lost
+		ResultData->SetStringField(TEXT("output"),
+			Result.Output.IsEmpty() ? Result.ErrorOutput : Result.Output);
 		ResultData->SetStringField(TEXT("error"), Result.ErrorOutput);
+
+		// Classify error type for easier handling
+		FString ErrorType = TEXT("execution_error");
+		if (ScriptTypeStr.ToLower() == TEXT("cpp"))
+		{
+			ErrorType = TEXT("compile_error");
+		}
+		else if (Result.ErrorOutput.Contains(TEXT("SyntaxError")) ||
+				 Result.ErrorOutput.Contains(TEXT("IndentationError")))
+		{
+			ErrorType = TEXT("syntax_error");
+		}
+		else if (Result.ErrorOutput.Contains(TEXT("Traceback")))
+		{
+			ErrorType = TEXT("runtime_error");
+		}
+		ResultData->SetStringField(TEXT("error_type"), ErrorType);
 
 		// Return error with detailed info for auto-retry
 		FMCPToolResult ErrorResult;

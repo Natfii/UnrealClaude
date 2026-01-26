@@ -294,6 +294,14 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		{
 			Color.A = 1.0f; // Default to fully opaque
 		}
+		// Auto-normalize: if any color component > 1.5, assume 0-255 range
+		if (Color.R > 1.5f || Color.G > 1.5f || Color.B > 1.5f)
+		{
+			Color.R /= 255.0f;
+			Color.G /= 255.0f;
+			Color.B /= 255.0f;
+			if (Color.A > 1.5f) Color.A /= 255.0f;
+		}
 		*reinterpret_cast<FLinearColor*>(ValuePtr) = Color;
 		return true;
 	}

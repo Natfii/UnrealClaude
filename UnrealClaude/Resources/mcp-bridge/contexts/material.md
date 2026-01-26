@@ -136,6 +136,7 @@ Material instance creation and parameter management.
 | `create_material_instance` | Create new MaterialInstanceConstant | asset_name, parent_material |
 | `set_material_parameters` | Set parameters on existing instance | material_instance_path, parameters |
 | `set_skeletal_mesh_material` | Assign material to skeletal mesh slot | skeletal_mesh_path, material_path |
+| `set_actor_material` | Assign material to an actor's mesh component | actor_name, material_path |
 | `get_material_info` | Get material details and parameters | asset_path |
 
 ### Example Usage
@@ -183,6 +184,14 @@ Material instance creation and parameter management.
   "material_path": "/Game/Materials/Characters/MI_Character_Red"
 }
 
+// Set material on an actor's mesh component (StaticMesh, SkeletalMesh, etc.)
+{
+  "operation": "set_actor_material",
+  "actor_name": "Cube",
+  "material_path": "/Game/Materials/Characters/MI_Character_Red",
+  "material_slot": 0
+}
+
 // Get material information
 {
   "operation": "get_material_info",
@@ -199,6 +208,16 @@ Material instance creation and parameter management.
   "asset_name": "MI_Character_Red",
   "parent_material": "/Game/Materials/M_Character_Base",
   "saved": true
+}
+
+// set_actor_material response
+{
+  "actor": "Cube",
+  "component": "StaticMeshComponent0",
+  "component_type": "StaticMeshComponent",
+  "slot": 0,
+  "old_material": "WorldGridMaterial",
+  "new_material": "MI_Character_Red"
 }
 
 // get_material_info response

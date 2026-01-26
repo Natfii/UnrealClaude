@@ -345,6 +345,7 @@ Available via `open_level`:
 |--------|-----------|-------------|
 | `open` | `level_path` (required) | Load an existing map by asset path (e.g., `/Game/Maps/MyLevel`) |
 | `new` | `template` (optional), `save_current` (optional) | Create a new blank map or from a named template |
+| `save_as` | `save_path` (required) | Save the current level to a specified asset path (e.g., `/Game/Maps/MyLevel`) |
 | `list_templates` | (none) | List all available map templates with names and paths |
 
 ## Best Practices

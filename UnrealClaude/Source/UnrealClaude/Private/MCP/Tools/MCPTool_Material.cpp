@@ -13,6 +13,12 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "Components/MeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "EngineUtils.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
@@ -25,11 +31,11 @@ FMCPToolInfo FMCPTool_Material::GetInfo() const
 {
 	FMCPToolInfo Info;
 	Info.Name = TEXT("material");
-	Info.Description = TEXT("Material instance creation and assignment operations for Skeletal Meshes");
+	Info.Description = TEXT("Material instance creation and assignment operations for meshes and actors");
 
 	// Parameters
 	Info.Parameters.Add(FMCPToolParameter(TEXT("operation"), TEXT("string"),
-		TEXT("Operation: create_material_instance, set_material_parameters, set_skeletal_mesh_material, get_material_info"), true));
+		TEXT("Operation: create_material_instance, set_material_parameters, set_skeletal_mesh_material, set_actor_material, get_material_info"), true));
 
 	// create_material_instance params
 	Info.Parameters.Add(FMCPToolParameter(TEXT("asset_name"), TEXT("string"),
@@ -52,6 +58,10 @@ FMCPToolInfo FMCPTool_Material::GetInfo() const
 		TEXT("Material slot index to set (for set_skeletal_mesh_material)")));
 	Info.Parameters.Add(FMCPToolParameter(TEXT("material_path"), TEXT("string"),
 		TEXT("Asset path to material to assign (for set_skeletal_mesh_material)")));
+
+	// set_actor_material params
+	Info.Parameters.Add(FMCPToolParameter(TEXT("actor_name"), TEXT("string"),
+		TEXT("Name or label of the actor to assign material to (for set_actor_material)")));
 
 	// get_material_info params
 	Info.Parameters.Add(FMCPToolParameter(TEXT("asset_path"), TEXT("string"),
@@ -85,13 +95,17 @@ FMCPToolResult FMCPTool_Material::Execute(const TSharedRef<FJsonObject>& Params)
 	{
 		return ExecuteSetSkeletalMeshMaterial(Params);
 	}
+	else if (Operation == TEXT("set_actor_material"))
+	{
+		return ExecuteSetActorMaterial(Params);
+	}
 	else if (Operation == TEXT("get_material_info"))
 	{
 		return ExecuteGetMaterialInfo(Params);
 	}
 
 	return FMCPToolResult::Error(FString::Printf(
-		TEXT("Unknown operation: %s. Valid: create_material_instance, set_material_parameters, set_skeletal_mesh_material, get_material_info"),
+		TEXT("Unknown operation: %s. Valid: create_material_instance, set_material_parameters, set_skeletal_mesh_material, set_actor_material, get_material_info"),
 		*Operation));
 }
 
@@ -339,6 +353,100 @@ FMCPToolResult FMCPTool_Material::ExecuteSetSkeletalMeshMaterial(const TSharedRe
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Set material slot %d on %s to %s"), MaterialSlot, *SkeletalMesh->GetName(), *Material->GetName()),
+		ResultData
+	);
+}
+
+FMCPToolResult FMCPTool_Material::ExecuteSetActorMaterial(const TSharedRef<FJsonObject>& Params)
+{
+	FString ActorName;
+	FString MaterialPath;
+	TOptional<FMCPToolResult> Error;
+
+	if (!ExtractActorName(Params, TEXT("actor_name"), ActorName, Error))
+	{
+		return Error.GetValue();
+	}
+	if (!ExtractRequiredString(Params, TEXT("material_path"), MaterialPath, Error))
+	{
+		return Error.GetValue();
+	}
+	if (!ValidateBlueprintPathParam(MaterialPath, Error))
+	{
+		return Error.GetValue();
+	}
+
+	// Get optional slot index
+	int32 MaterialSlot = 0;
+	if (Params->HasField(TEXT("material_slot")))
+	{
+		MaterialSlot = Params->GetIntegerField(TEXT("material_slot"));
+		if (MaterialSlot < 0)
+		{
+			return FMCPToolResult::Error(TEXT("material_slot must be >= 0"));
+		}
+	}
+
+	// Validate editor context
+	UWorld* World = nullptr;
+	if (auto EditorError = ValidateEditorContext(World))
+	{
+		return EditorError.GetValue();
+	}
+
+	// Find actor
+	AActor* Actor = FindActorByNameOrLabel(World, ActorName);
+	if (!Actor)
+	{
+		return ActorNotFoundError(ActorName);
+	}
+
+	// Find first mesh component on actor
+	UMeshComponent* MeshComp = Actor->FindComponentByClass<UMeshComponent>();
+	if (!MeshComp)
+	{
+		return FMCPToolResult::Error(FString::Printf(
+			TEXT("Actor '%s' has no mesh component"), *ActorName));
+	}
+
+	// Validate slot bounds
+	int32 NumMaterials = MeshComp->GetNumMaterials();
+	if (MaterialSlot >= NumMaterials)
+	{
+		return FMCPToolResult::Error(FString::Printf(
+			TEXT("Material slot %d out of range. Mesh component has %d material slots."),
+			MaterialSlot, NumMaterials));
+	}
+
+	// Load material
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+	if (!Material)
+	{
+		return FMCPToolResult::Error(FString::Printf(TEXT("Failed to load material: %s"), *MaterialPath));
+	}
+
+	// Store old material name
+	UMaterialInterface* OldMaterial = MeshComp->GetMaterial(MaterialSlot);
+	FString OldMaterialName = OldMaterial ? OldMaterial->GetName() : TEXT("None");
+
+	// Set material on the component (runtime override)
+	MeshComp->SetMaterial(MaterialSlot, Material);
+
+	// Mark dirty
+	MarkActorDirty(Actor);
+
+	// Build result
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("actor"), Actor->GetName());
+	ResultData->SetStringField(TEXT("component"), MeshComp->GetName());
+	ResultData->SetStringField(TEXT("component_type"), MeshComp->GetClass()->GetName());
+	ResultData->SetNumberField(TEXT("slot"), MaterialSlot);
+	ResultData->SetStringField(TEXT("old_material"), OldMaterialName);
+	ResultData->SetStringField(TEXT("new_material"), Material->GetName());
+
+	return FMCPToolResult::Success(
+		FString::Printf(TEXT("Set material slot %d on actor '%s' (%s) to %s"),
+			MaterialSlot, *Actor->GetName(), *MeshComp->GetClass()->GetName(), *Material->GetName()),
 		ResultData
 	);
 }

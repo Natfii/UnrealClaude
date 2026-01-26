@@ -87,6 +87,9 @@ const CONTEXT_CONFIG = {
       "load map",
       "switch level",
       "template map",
+      "save level",
+      "save map",
+      "save as",
     ],
   },
   assets: {
@@ -169,7 +172,7 @@ const CONTEXT_CONFIG = {
   },
   material: {
     files: ["material.md"],
-    toolPatterns: [/^material/, /skeletal_mesh_material/],
+    toolPatterns: [/^material/, /skeletal_mesh_material/, /actor_material/],
     keywords: [
       "material",
       "material instance",

@@ -5,6 +5,8 @@
 #include "FileHelpers.h"
 #include "Editor/UnrealEdEngine.h"
 #include "UnrealEdGlobals.h"
+#include "Editor.h"
+#include "Misc/PackageName.h"
 
 FMCPToolResult FMCPTool_OpenLevel::Execute(const TSharedRef<FJsonObject>& Params)
 {
@@ -26,13 +28,17 @@ FMCPToolResult FMCPTool_OpenLevel::Execute(const TSharedRef<FJsonObject>& Params
 	{
 		return ExecuteNew(Params);
 	}
+	else if (Action == TEXT("save_as"))
+	{
+		return ExecuteSaveAs(Params);
+	}
 	else if (Action == TEXT("list_templates"))
 	{
 		return ExecuteListTemplates();
 	}
 
 	return FMCPToolResult::Error(FString::Printf(
-		TEXT("Unknown action: '%s'. Use 'open', 'new', or 'list_templates'."), *Action));
+		TEXT("Unknown action: '%s'. Use 'open', 'new', 'save_as', or 'list_templates'."), *Action));
 }
 
 FMCPToolResult FMCPTool_OpenLevel::ExecuteOpen(const TSharedRef<FJsonObject>& Params)
@@ -169,6 +175,54 @@ FMCPToolResult FMCPTool_OpenLevel::ExecuteNew(const TSharedRef<FJsonObject>& Par
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Created new map from template '%s': %s"), *TemplateName, *NewWorld->GetMapName()),
 		ResultData);
+}
+
+FMCPToolResult FMCPTool_OpenLevel::ExecuteSaveAs(const TSharedRef<FJsonObject>& Params)
+{
+	FString SavePath;
+	TOptional<FMCPToolResult> Error;
+	if (!ExtractRequiredString(Params, TEXT("save_path"), SavePath, Error))
+	{
+		return Error.GetValue();
+	}
+
+	FString ValidationError;
+	if (!ValidateLevelPath(SavePath, ValidationError))
+	{
+		return FMCPToolResult::Error(ValidationError);
+	}
+
+	// Get current world
+	if (!GEditor)
+	{
+		return FMCPToolResult::Error(TEXT("Editor not available"));
+	}
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	if (!World)
+	{
+		return FMCPToolResult::Error(TEXT("No world currently loaded"));
+	}
+
+	// Convert package path to filename
+	FString Filename = FPackageName::LongPackageNameToFilename(SavePath, FPackageName::GetMapPackageExtension());
+
+	// Save the map
+	bool bSaved = FEditorFileUtils::SaveMap(World, Filename);
+	if (!bSaved)
+	{
+		return FMCPToolResult::Error(FString::Printf(
+			TEXT("Failed to save level to: '%s'"), *SavePath));
+	}
+
+	// Build result
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("action"), TEXT("save_as"));
+	ResultData->SetStringField(TEXT("save_path"), SavePath);
+	ResultData->SetStringField(TEXT("filename"), Filename);
+	ResultData->SetStringField(TEXT("mapName"), World->GetMapName());
+
+	return FMCPToolResult::Success(
+		FString::Printf(TEXT("Saved level to: %s"), *SavePath), ResultData);
 }
 
 FMCPToolResult FMCPTool_OpenLevel::ExecuteListTemplates()
