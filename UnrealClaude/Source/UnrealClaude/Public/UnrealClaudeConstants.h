@@ -187,6 +187,8 @@ namespace UnrealClaudeConstants
 			TEXT("asset_search"),
 			TEXT("asset_dependencies"),
 			TEXT("asset_referencers"),
+			// Level management tools
+			TEXT("open_level"),
 			// Task queue tools
 			TEXT("task_submit"),
 			TEXT("task_status"),

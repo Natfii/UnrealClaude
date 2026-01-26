@@ -43,8 +43,9 @@ public:
 		Info.Name = TEXT("execute_script");
 		Info.Description = TEXT(
 			"Execute custom scripts in Unreal Engine with user permission.\n\n"
-			"POWERFUL: This tool enables complex operations not possible with other tools. "
-			"Scripts run with full engine access. User approval required before execution.\n\n"
+			"IMPORTANT: Only use this tool when no dedicated MCP tool can accomplish the task. "
+			"Prefer specific tools first: spawn_actor, move_actor, set_property, blueprint_modify, "
+			"open_level, asset_search, etc. Scripts require user approval and are slower than dedicated tools.\n\n"
 			"Script types:\n"
 			"- 'cpp': C++ via Live Coding (auto-retries on compile failure)\n"
 			"- 'python': Python script (requires Python plugin)\n"

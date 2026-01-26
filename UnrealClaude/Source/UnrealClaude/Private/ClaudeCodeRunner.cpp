@@ -395,11 +395,10 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += TEXT("--dangerously-skip-permissions ");
 	}
 
-	// JSON output if requested (but not when image attached -- stream-json overrides)
-	if (Config.bUseJsonOutput && Config.AttachedImagePaths.Num() == 0)
-	{
-		CommandLine += TEXT("--output-format json ");
-	}
+	// Always use stream-json for structured NDJSON output
+	// This enables real-time parsing of text, tool_use, and tool_result events
+	CommandLine += TEXT("--output-format stream-json ");
+	CommandLine += TEXT("--input-format stream-json ");
 
 	// MCP config for editor tools
 	FString PluginDir = GetPluginDirectory();
@@ -445,13 +444,6 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 	if (AllTools.Num() > 0)
 	{
 		CommandLine += FString::Printf(TEXT("--allowedTools \"%s\" "), *FString::Join(AllTools, TEXT(",")));
-	}
-
-	// Use stream-json input/output format when images are attached (required for multimodal content)
-	// Claude CLI requires both input and output to use stream-json together
-	if (Config.AttachedImagePaths.Num() > 0)
-	{
-		CommandLine += TEXT("--input-format stream-json --output-format stream-json ");
 	}
 
 	// Write prompts to files to avoid command line length limits (Error 206)
@@ -711,6 +703,252 @@ FString FClaudeCodeRunner::ParseStreamJsonOutput(const FString& RawOutput)
 	return TEXT("Error: Failed to parse Claude's response. Check the Output Log for details.");
 }
 
+void FClaudeCodeRunner::ParseAndEmitNdjsonLine(const FString& JsonLine)
+{
+	if (JsonLine.IsEmpty())
+	{
+		return;
+	}
+
+	TSharedPtr<FJsonObject> JsonObj;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
+	{
+		UE_LOG(LogUnrealClaude, Verbose, TEXT("NDJSON: Non-JSON line (skipping): %.200s"), *JsonLine);
+		return;
+	}
+
+	FString Type;
+	if (!JsonObj->TryGetStringField(TEXT("type"), Type))
+	{
+		UE_LOG(LogUnrealClaude, Verbose, TEXT("NDJSON: Line missing 'type' field"));
+		return;
+	}
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON Event: type=%s"), *Type);
+
+	if (Type == TEXT("system"))
+	{
+		// Session init event
+		FString Subtype;
+		JsonObj->TryGetStringField(TEXT("subtype"), Subtype);
+		FString SessionId;
+		JsonObj->TryGetStringField(TEXT("session_id"), SessionId);
+
+		UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON System: subtype=%s, session_id=%s"), *Subtype, *SessionId);
+
+		if (CurrentConfig.OnStreamEvent.IsBound())
+		{
+			FClaudeStreamEvent Event;
+			Event.Type = EClaudeStreamEventType::SessionInit;
+			Event.SessionId = SessionId;
+			Event.RawJson = JsonLine;
+			FOnClaudeStreamEvent EventDelegate = CurrentConfig.OnStreamEvent;
+			AsyncTask(ENamedThreads::GameThread, [EventDelegate, Event]()
+			{
+				EventDelegate.ExecuteIfBound(Event);
+			});
+		}
+	}
+	else if (Type == TEXT("assistant"))
+	{
+		// Assistant message with content blocks
+		const TSharedPtr<FJsonObject>* MessageObj;
+		if (!JsonObj->TryGetObjectField(TEXT("message"), MessageObj))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("NDJSON: assistant message missing 'message' field"));
+			return;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+		if (!(*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("NDJSON: assistant message.content missing"));
+			return;
+		}
+
+		for (const TSharedPtr<FJsonValue>& ContentValue : *ContentArray)
+		{
+			const TSharedPtr<FJsonObject>* ContentObj;
+			if (!ContentValue->TryGetObject(ContentObj))
+			{
+				continue;
+			}
+
+			FString ContentType;
+			if (!(*ContentObj)->TryGetStringField(TEXT("type"), ContentType))
+			{
+				continue;
+			}
+
+			if (ContentType == TEXT("text"))
+			{
+				FString Text;
+				if ((*ContentObj)->TryGetStringField(TEXT("text"), Text))
+				{
+					UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON TextContent: %d chars"), Text.Len());
+					AccumulatedResponseText += Text;
+
+					// Fire old progress delegate for backward compat
+					if (OnProgressDelegate.IsBound())
+					{
+						FOnClaudeProgress ProgressCopy = OnProgressDelegate;
+						AsyncTask(ENamedThreads::GameThread, [ProgressCopy, Text]()
+						{
+							ProgressCopy.ExecuteIfBound(Text);
+						});
+					}
+
+					// Fire new structured event
+					if (CurrentConfig.OnStreamEvent.IsBound())
+					{
+						FClaudeStreamEvent Event;
+						Event.Type = EClaudeStreamEventType::TextContent;
+						Event.Text = Text;
+						FOnClaudeStreamEvent EventDelegate = CurrentConfig.OnStreamEvent;
+						AsyncTask(ENamedThreads::GameThread, [EventDelegate, Event]()
+						{
+							EventDelegate.ExecuteIfBound(Event);
+						});
+					}
+				}
+			}
+			else if (ContentType == TEXT("tool_use"))
+			{
+				FString ToolName, ToolId;
+				(*ContentObj)->TryGetStringField(TEXT("name"), ToolName);
+				(*ContentObj)->TryGetStringField(TEXT("id"), ToolId);
+
+				// Serialize input to string
+				FString ToolInputStr;
+				const TSharedPtr<FJsonObject>* InputObj;
+				if ((*ContentObj)->TryGetObjectField(TEXT("input"), InputObj))
+				{
+					TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+						TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&ToolInputStr);
+					FJsonSerializer::Serialize((*InputObj).ToSharedRef(), Writer);
+					Writer->Close();
+				}
+
+				UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON ToolUse: name=%s, id=%s, input=%d chars"),
+					*ToolName, *ToolId, ToolInputStr.Len());
+
+				if (CurrentConfig.OnStreamEvent.IsBound())
+				{
+					FClaudeStreamEvent Event;
+					Event.Type = EClaudeStreamEventType::ToolUse;
+					Event.ToolName = ToolName;
+					Event.ToolCallId = ToolId;
+					Event.ToolInput = ToolInputStr;
+					Event.RawJson = JsonLine;
+					FOnClaudeStreamEvent EventDelegate = CurrentConfig.OnStreamEvent;
+					AsyncTask(ENamedThreads::GameThread, [EventDelegate, Event]()
+					{
+						EventDelegate.ExecuteIfBound(Event);
+					});
+				}
+			}
+			else
+			{
+				UE_LOG(LogUnrealClaude, Verbose, TEXT("NDJSON: unknown content block type: %s"), *ContentType);
+			}
+		}
+	}
+	else if (Type == TEXT("user"))
+	{
+		// Tool result message
+		const TSharedPtr<FJsonObject>* MessageObj;
+		if (!JsonObj->TryGetObjectField(TEXT("message"), MessageObj))
+		{
+			return;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+		if (!(*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+		{
+			return;
+		}
+
+		for (const TSharedPtr<FJsonValue>& ContentValue : *ContentArray)
+		{
+			const TSharedPtr<FJsonObject>* ContentObj;
+			if (!ContentValue->TryGetObject(ContentObj))
+			{
+				continue;
+			}
+
+			FString ContentType;
+			if (!(*ContentObj)->TryGetStringField(TEXT("type"), ContentType))
+			{
+				continue;
+			}
+
+			if (ContentType == TEXT("tool_result"))
+			{
+				FString ToolUseId, ResultContent;
+				(*ContentObj)->TryGetStringField(TEXT("tool_use_id"), ToolUseId);
+				(*ContentObj)->TryGetStringField(TEXT("content"), ResultContent);
+
+				UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON ToolResult: tool_use_id=%s, content=%d chars"),
+					*ToolUseId, ResultContent.Len());
+
+				if (CurrentConfig.OnStreamEvent.IsBound())
+				{
+					FClaudeStreamEvent Event;
+					Event.Type = EClaudeStreamEventType::ToolResult;
+					Event.ToolCallId = ToolUseId;
+					Event.ToolResultContent = ResultContent;
+					Event.RawJson = JsonLine;
+					FOnClaudeStreamEvent EventDelegate = CurrentConfig.OnStreamEvent;
+					AsyncTask(ENamedThreads::GameThread, [EventDelegate, Event]()
+					{
+						EventDelegate.ExecuteIfBound(Event);
+					});
+				}
+			}
+		}
+	}
+	else if (Type == TEXT("result"))
+	{
+		// Final result message with stats
+		FString ResultText, Subtype;
+		JsonObj->TryGetStringField(TEXT("result"), ResultText);
+		JsonObj->TryGetStringField(TEXT("subtype"), Subtype);
+		bool bIsError = false;
+		JsonObj->TryGetBoolField(TEXT("is_error"), bIsError);
+		double DurationMs = 0.0;
+		JsonObj->TryGetNumberField(TEXT("duration_ms"), DurationMs);
+		double NumTurns = 0.0;
+		JsonObj->TryGetNumberField(TEXT("num_turns"), NumTurns);
+		double TotalCostUsd = 0.0;
+		JsonObj->TryGetNumberField(TEXT("total_cost_usd"), TotalCostUsd);
+
+		UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON Result: subtype=%s, is_error=%d, duration=%.0fms, turns=%.0f, cost=$%.4f, result=%d chars"),
+			*Subtype, bIsError, DurationMs, NumTurns, TotalCostUsd, ResultText.Len());
+
+		if (CurrentConfig.OnStreamEvent.IsBound())
+		{
+			FClaudeStreamEvent Event;
+			Event.Type = EClaudeStreamEventType::Result;
+			Event.ResultText = ResultText;
+			Event.bIsError = bIsError;
+			Event.DurationMs = static_cast<int32>(DurationMs);
+			Event.NumTurns = static_cast<int32>(NumTurns);
+			Event.TotalCostUsd = static_cast<float>(TotalCostUsd);
+			Event.RawJson = JsonLine;
+			FOnClaudeStreamEvent EventDelegate = CurrentConfig.OnStreamEvent;
+			AsyncTask(ENamedThreads::GameThread, [EventDelegate, Event]()
+			{
+				EventDelegate.ExecuteIfBound(Event);
+			});
+		}
+	}
+	else
+	{
+		UE_LOG(LogUnrealClaude, Verbose, TEXT("NDJSON: unhandled message type: %s"), *Type);
+	}
+}
+
 void FClaudeCodeRunner::Cancel()
 {
 	StopTaskCounter.Set(1);
@@ -742,6 +980,8 @@ bool FClaudeCodeRunner::Init()
 {
 	// bIsExecuting is already set by ExecuteAsync (thread-safe)
 	StopTaskCounter.Reset();
+	NdjsonLineBuffer.Empty();
+	AccumulatedResponseText.Empty();
 	return true;
 }
 
@@ -869,9 +1109,9 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 	HANDLE StdOutReadPipe = static_cast<HANDLE>(ReadPipe);
 	HANDLE hProcess = static_cast<HANDLE>(ProcessHandle);
 
-	// When using stream-json (image attachment), suppress progress callbacks since
-	// the raw output is NDJSON that must be parsed before display
-	bool bSuppressProgress = CurrentConfig.AttachedImagePaths.Num() > 0;
+	// Reset NDJSON state for this request
+	NdjsonLineBuffer.Empty();
+	AccumulatedResponseText.Empty();
 
 	while (!StopTaskCounter.GetValue())
 	{
@@ -885,15 +1125,20 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 			FString OutputChunk = UTF8_TO_TCHAR(Buffer);
 			FullOutput += OutputChunk;
 
-			// Report progress (skip for stream-json mode to avoid displaying raw NDJSON)
-			if (!bSuppressProgress && OnProgressDelegate.IsBound())
+			// Parse NDJSON line-by-line: buffer chunks and split on newlines
+			NdjsonLineBuffer += OutputChunk;
+
+			int32 NewlineIdx;
+			while (NdjsonLineBuffer.FindChar(TEXT('\n'), NewlineIdx))
 			{
-				FOnClaudeProgress ProgressCopy = OnProgressDelegate;
-				FString ProgressChunk = OutputChunk;
-				AsyncTask(ENamedThreads::GameThread, [ProgressCopy, ProgressChunk]()
+				FString CompleteLine = NdjsonLineBuffer.Left(NewlineIdx);
+				CompleteLine.TrimEndInline();
+				NdjsonLineBuffer.RightChopInline(NewlineIdx + 1);
+
+				if (!CompleteLine.IsEmpty())
 				{
-					ProgressCopy.ExecuteIfBound(ProgressChunk);
-				});
+					ParseAndEmitNdjsonLine(CompleteLine);
+				}
 			}
 		}
 
@@ -903,8 +1148,33 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 			while (ReadFile(StdOutReadPipe, Buffer, sizeof(Buffer) - 1, &BytesRead, NULL) && BytesRead > 0)
 			{
 				Buffer[BytesRead] = '\0';
-				FullOutput += UTF8_TO_TCHAR(Buffer);
+				FString OutputChunk = UTF8_TO_TCHAR(Buffer);
+				FullOutput += OutputChunk;
+				NdjsonLineBuffer += OutputChunk;
 			}
+
+			// Parse all remaining buffered lines (may contain multiple newline-delimited JSON objects)
+			int32 FinalNewlineIdx;
+			while (NdjsonLineBuffer.FindChar(TEXT('\n'), FinalNewlineIdx))
+			{
+				FString CompleteLine = NdjsonLineBuffer.Left(FinalNewlineIdx);
+				CompleteLine.TrimEndInline();
+				NdjsonLineBuffer.RightChopInline(FinalNewlineIdx + 1);
+
+				if (!CompleteLine.IsEmpty())
+				{
+					ParseAndEmitNdjsonLine(CompleteLine);
+				}
+			}
+
+			// Parse any final incomplete line (no trailing newline)
+			NdjsonLineBuffer.TrimEndInline();
+			if (!NdjsonLineBuffer.IsEmpty())
+			{
+				ParseAndEmitNdjsonLine(NdjsonLineBuffer);
+				NdjsonLineBuffer.Empty();
+			}
+
 			break;
 		}
 	}
@@ -1003,13 +1273,10 @@ void FClaudeCodeRunner::ExecuteProcess()
 		return;
 	}
 
-	// Write prompt to stdin (Claude -p reads from stdin if no prompt on command line)
+	// Write prompt to stdin as stream-json NDJSON payload
 	HANDLE StdInWrite = static_cast<HANDLE>(StdInWritePipe);
 	if (StdInWrite)
 	{
-		FString StdinPayload;
-		bool bHasImageAttachment = CurrentConfig.AttachedImagePaths.Num() > 0;
-
 		// Build the text portion of the prompt (system context + user message)
 		FString TextPrompt;
 		if (!SystemPromptFilePath.IsEmpty())
@@ -1029,16 +1296,8 @@ void FClaudeCodeRunner::ExecuteProcess()
 			}
 		}
 
-		if (bHasImageAttachment)
-		{
-			// Stream-json mode: build NDJSON with multimodal content blocks (text + base64 images)
-			StdinPayload = BuildStreamJsonPayload(TextPrompt, CurrentConfig.AttachedImagePaths);
-		}
-		else
-		{
-			// Plain text mode: pipe the text directly
-			StdinPayload = TextPrompt;
-		}
+		// Always use stream-json payload (handles text-only and image cases uniformly)
+		FString StdinPayload = BuildStreamJsonPayload(TextPrompt, CurrentConfig.AttachedImagePaths);
 
 		// Write to stdin
 		if (!StdinPayload.IsEmpty())
@@ -1046,9 +1305,8 @@ void FClaudeCodeRunner::ExecuteProcess()
 			FTCHARToUTF8 Utf8Payload(*StdinPayload);
 			DWORD BytesWritten;
 			WriteFile(StdInWrite, Utf8Payload.Get(), Utf8Payload.Length(), &BytesWritten, NULL);
-			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote %d bytes to Claude stdin (format: %s, system: %d chars, user: %d chars)"),
-				BytesWritten,
-				bHasImageAttachment ? TEXT("stream-json") : TEXT("text"),
+			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote %d bytes to Claude stdin (stream-json, images: %d, system: %d chars, user: %d chars)"),
+				BytesWritten, CurrentConfig.AttachedImagePaths.Num(),
 				CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
 		}
 
@@ -1061,13 +1319,18 @@ void FClaudeCodeRunner::ExecuteProcess()
 	SystemPromptFilePath.Empty();
 	PromptFilePath.Empty();
 
-	// Read output until process completes
+	// Read output until process completes (NDJSON events parsed during reading)
 	FString FullOutput = ReadProcessOutput();
 
-	// If stream-json output was used (image attachment), parse NDJSON to extract text
-	if (CurrentConfig.AttachedImagePaths.Num() > 0)
+	// Use accumulated response text from parsed NDJSON events
+	// Falls back to legacy ParseStreamJsonOutput if no events were parsed
+	FString ResponseText = AccumulatedResponseText;
+	if (ResponseText.IsEmpty() && !FullOutput.IsEmpty())
 	{
-		FullOutput = ParseStreamJsonOutput(FullOutput);
+		// Fallback: try legacy parsing in case NDJSON format wasn't as expected
+		ResponseText = ParseStreamJsonOutput(FullOutput);
+		UE_LOG(LogUnrealClaude, Log, TEXT("NDJSON parser produced no text, fell back to legacy parser (%d chars)"),
+			ResponseText.Len());
 	}
 
 	// Get exit code
@@ -1080,9 +1343,9 @@ void FClaudeCodeRunner::ExecuteProcess()
 	ReadPipe = nullptr;
 	ProcessHandle = nullptr;
 
-	// Report completion
+	// Report completion with parsed response text
 	bool bSuccess = (ExitCode == 0) && !StopTaskCounter.GetValue();
-	ReportCompletion(FullOutput, bSuccess);
+	ReportCompletion(ResponseText, bSuccess);
 
 #endif // PLATFORM_WINDOWS
 }

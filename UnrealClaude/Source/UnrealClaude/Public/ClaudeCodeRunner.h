@@ -53,6 +53,15 @@ private:
 	void ExecuteProcess();
 	void CleanupHandles();
 
+	/** Parse a single NDJSON line and emit structured events */
+	void ParseAndEmitNdjsonLine(const FString& JsonLine);
+
+	/** Buffer for accumulating incomplete NDJSON lines across read chunks */
+	FString NdjsonLineBuffer;
+
+	/** Accumulated text from assistant messages for the final response */
+	FString AccumulatedResponseText;
+
 #if PLATFORM_WINDOWS
 	/** Create pipes for process stdout/stderr capture */
 	bool CreateProcessPipes();

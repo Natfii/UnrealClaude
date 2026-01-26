@@ -13,6 +13,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "Editor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 
 // Live Coding support
 #if WITH_LIVE_CODING
@@ -312,16 +313,52 @@ FScriptExecutionResult FScriptExecutionManager::ExecutePython(
 		return FScriptExecutionResult::Error(TEXT("Failed to write Python script file"));
 	}
 
+	// Count actors before execution for validation
+	int32 ActorCountBefore = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		ActorCountBefore++;
+	}
+
 	// Execute via console command
 	FString Command = FString::Printf(TEXT("py \"%s\""), *FilePath);
 
-	// Capture output using shared utility
-	FUnrealClaudeOutputDevice OutputDevice;
-	GEditor->Exec(World, *Command, OutputDevice);
+	// Capture both exec output and global log output (Python errors go to GLog, not exec output)
+	FUnrealClaudeOutputDevice ExecOutput;
+	FUnrealClaudeOutputDevice LogOutput;
+	GLog->AddOutputDevice(&LogOutput);
 
-	FString Output = OutputDevice.GetTrimmedOutput();
+	GEditor->Exec(World, *Command, ExecOutput);
 
-	// Detect Python errors in output
+	GLog->RemoveOutputDevice(&LogOutput);
+
+	// Combine both output sources
+	FString ExecText = ExecOutput.GetTrimmedOutput();
+	FString LogText = LogOutput.GetTrimmedOutput();
+	FString Output = ExecText;
+	if (!LogText.IsEmpty())
+	{
+		if (!Output.IsEmpty())
+		{
+			Output += TEXT("\n");
+		}
+		Output += LogText;
+	}
+
+	// Count actors after execution
+	int32 ActorCountAfter = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		ActorCountAfter++;
+	}
+	int32 ActorsCreated = ActorCountAfter - ActorCountBefore;
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("Python script output (%d chars): %s"),
+		Output.Len(), Output.Len() > 500 ? *(Output.Left(500) + TEXT("...")) : *Output);
+	UE_LOG(LogUnrealClaude, Log, TEXT("Python script actor delta: %d before, %d after (%+d)"),
+		ActorCountBefore, ActorCountAfter, ActorsCreated);
+
+	// Detect Python errors in output (check both exec and log output)
 	bool bHasError = Output.Contains(TEXT("Traceback")) ||
 	                 Output.Contains(TEXT("Error:")) ||
 	                 Output.Contains(TEXT("SyntaxError")) ||
@@ -329,7 +366,35 @@ FScriptExecutionResult FScriptExecutionManager::ExecutePython(
 	                 Output.Contains(TEXT("TypeError")) ||
 	                 Output.Contains(TEXT("ValueError")) ||
 	                 Output.Contains(TEXT("ImportError")) ||
-	                 Output.Contains(TEXT("AttributeError"));
+	                 Output.Contains(TEXT("AttributeError")) ||
+	                 Output.Contains(TEXT("RuntimeError")) ||
+	                 Output.Contains(TEXT("Exception:")) ||
+	                 Output.Contains(TEXT("ModuleNotFoundError")) ||
+	                 Output.Contains(TEXT("FileNotFoundError")) ||
+	                 Output.Contains(TEXT("IndentationError")) ||
+	                 Output.Contains(TEXT("KeyError"));
+
+	// Build result message with actor count info
+	FString ResultMessage;
+	if (bHasError)
+	{
+		ResultMessage = TEXT("Python script execution failed");
+	}
+	else
+	{
+		ResultMessage = FString::Printf(TEXT("Python script executed (actors created: %d)"), ActorsCreated);
+	}
+
+	// Append output to result so Claude can see what happened
+	FString FullOutput = Output;
+	if (ActorsCreated > 0)
+	{
+		FullOutput += FString::Printf(TEXT("\n[%d new actors added to level]"), ActorsCreated);
+	}
+	else if (!bHasError)
+	{
+		FullOutput += TEXT("\n[WARNING: Script reported success but no new actors were created in the level. The script may have failed silently.]");
+	}
 
 	// Add to history
 	FScriptHistoryEntry Entry;
@@ -337,22 +402,16 @@ FScriptExecutionResult FScriptExecutionManager::ExecutePython(
 	Entry.Filename = ScriptName + TEXT(".py");
 	Entry.Description = Description;
 	Entry.bSuccess = !bHasError;
-	Entry.ResultMessage = Output.Left(200);
+	Entry.ResultMessage = ResultMessage.Left(200);
 	Entry.FilePath = FilePath;
 	AddToHistory(Entry);
 
 	if (bHasError)
 	{
-		return FScriptExecutionResult::Error(
-			TEXT("Python script execution failed"),
-			Output
-		);
+		return FScriptExecutionResult::Error(ResultMessage, FullOutput);
 	}
 
-	return FScriptExecutionResult::Success(
-		TEXT("Python script executed"),
-		Output
-	);
+	return FScriptExecutionResult::Success(ResultMessage, FullOutput);
 }
 
 FScriptExecutionResult FScriptExecutionManager::ExecuteConsole(

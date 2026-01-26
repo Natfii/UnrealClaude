@@ -12,10 +12,11 @@ UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs
 
 
 **Key Features:**
-- **Native Editor Integration** - Chat panel docked in your editor
-- **MCP Server** - Model Context Protocol server for external tool integration
+- **Native Editor Integration** - Chat panel docked in your editor with live streaming responses, tool call grouping, and code block rendering
+- **MCP Server** - 20+ Model Context Protocol tools for actor manipulation, Blueprint editing, level management, materials, input, and more
 - **Dynamic UE 5.7 Context System** - The MCP bridge includes a dynamic context loader that provides accurate UE 5.7 API documentation on demand
 - **Blueprint Editing** - Create and modify Blueprints, Animation Blueprints, state machines (Few bugs still, don't rely on fully)
+- **Level Management** - Open, create, and manage levels and map templates programmatically
 - **Asset Management** - Search assets, query dependencies and referencers
 - **Async Task Queue** - Long-running operations won't timeout (WIP)
 - **Script Execution** - Claude can write, compile (via Live Coding), and execute scripts with your permission
@@ -144,178 +145,23 @@ UnrealClaude automatically gathers information about your project:
 
 ### MCP Server
 
-The plugin includes a Model Context Protocol (MCP) server that exposes editor functionality to external tools. Available MCP tools:
+The plugin includes a Model Context Protocol (MCP) server with 20+ tools that expose editor functionality to Claude and external tools. The MCP server runs on port 3000 by default and starts automatically when the editor loads.
 
-#### Actor Tools
-
-| Tool | Description |
-|------|-------------|
-| `get_level_actors` | List all actors in the current level |
-| `spawn_actor` | Spawn a new actor by class |
-| `delete_actors` | Delete actors by name |
-| `move_actor` | Move/rotate/scale actors |
-| `set_property` | Set actor properties |
-
-#### Blueprint Tools
-
-| Tool | Description |
-|------|-------------|
-| `blueprint_query` | Query Blueprint information (list, inspect, get_graph) |
-| `blueprint_modify` | Modify Blueprints (create, add/remove variables and functions, add/delete nodes, connect/disconnect pins, set pin values) |
-
-The `blueprint_modify` tool supports:
-- **Level 2**: Create Blueprints, add/remove variables and functions
-- **Level 3**: Add single or batch nodes to graphs
-- **Level 4**: Connect/disconnect pins, set default pin values
-
-All modifications auto-compile the Blueprint after changes and return detailed compile results including errors and warnings.
-
-#### Animation Blueprint Tools
-
-| Tool | Description |
-|------|-------------|
-| `anim_blueprint_modify` | Modify Animation Blueprints (state machines, states, transitions, conditions, anim nodes) |
-
-The `anim_blueprint_modify` tool supports comprehensive state machine editing:
-
-**State Machine Operations:**
-- `create_state_machine` - Create new state machine in an Animation Blueprint
-- `get_state_machine` - Get detailed state machine info
-- `get_info` - Get Animation Blueprint structure overview
-- `set_entry_state` - Set the default entry state
-
-**State Operations:**
-- `add_state` - Create a new state in a state machine
-- `remove_state` - Delete a state
-
-**Transition Operations:**
-- `add_transition` - Create a transition between two states
-- `remove_transition` - Delete a transition
-- `set_transition_duration` - Set blend duration
-- `set_transition_priority` - Set evaluation priority
-
-**Transition Condition Operations:**
-- `add_condition_node` - Add logic nodes (TimeRemaining, Greater, Less, And, Or, Not, GetVariable)
-- `delete_condition_node` - Remove condition node
-- `connect_condition_nodes` - Connect condition nodes together
-- `connect_to_result` - Connect condition output to transition result
-- `add_comparison_chain` - Add GetVariable → Comparison → Result chain (auto-ANDs with existing)
-  - Supports Float, Integer, Boolean, Byte, and Enum variable types
-  - Auto-detects variable type and creates appropriate comparison node
-
-**Bulk Transition Conditions:**
-- `setup_transition_conditions` - Set up conditions for multiple transitions using pattern matching
-
-The bulk operation supports flexible pattern matching:
-- **Exact match**: `"from": "Idle"` matches only "Idle"
-- **Wildcard**: `"*"` matches any, `"Attack_*"` matches Attack_1, Attack_2, etc.
-- **Regex**: `"^Attack_\\d+$"` for advanced patterns
-- **Array list**: `["Idle", "Walk", "Run"]` matches any listed state
-
-**Example - Setup conditions for multiple transitions:**
-```json
-{
-  "operation": "setup_transition_conditions",
-  "blueprint_path": "/Game/Characters/ABP_Character",
-  "state_machine": "Locomotion",
-  "rules": [
-    {
-      "match": { "from": "*", "to": "Walk" },
-      "conditions": [
-        {"variable": "Speed", "comparison": "Greater", "value": "10"}
-      ],
-      "logic": "AND"
-    },
-    {
-      "match": { "from": "Attack_*", "to": "*" },
-      "conditions": [
-        {"type": "TimeRemaining", "comparison": "Less", "value": "0.1"}
-      ]
-    }
-  ]
-}
-```
-
-**Batch Operations:**
-Use `operation: "batch"` with an `operations` array to execute multiple operations with a single compile:
-- Supports: `add_state`, `remove_state`, `add_transition`, `remove_transition`, `set_transition_duration`, `set_state_animation`, `add_comparison_chain`, `add_condition_node`, `connect_condition_nodes`, `connect_to_result`
-
-**Animation Assignment:**
-- `set_state_animation` - Assign AnimSequence, BlendSpace, BlendSpace1D, or Montage to states
-- `find_animations` - Search for compatible animation assets
-- `connect_state_machine_to_output` - Connect State Machine to AnimGraph Output Pose
-
-**Introspection & Visualization:**
-- `get_transition_nodes` - List all nodes in transition graph(s) with pins
-- `inspect_node_pins` - Get detailed pin info for a node
-- `set_pin_default_value` - Set pin default value with type validation
-- `validate_blueprint` - Return compile errors with full diagnostics
-- `get_state_machine_diagram` - Generate ASCII diagram and enhanced JSON for state machine visualization
-
-**Smart Pin Type Detection:**
-- When connecting pins, the system automatically detects type mismatches (e.g., integer variable → float comparison)
-- Comparison nodes are automatically recreated with the correct type (Integer, Float, Boolean, Byte, Enum)
-- No manual type specification needed - the system infers from connected variable types
-
-All modifications auto-compile the Animation Blueprint after changes and return structured compile results with error details for easy debugging.
-
-#### Asset Tools
-
-| Tool | Description |
-|------|-------------|
-| `asset_search` | Search for assets by class, path, or name with pagination |
-| `asset_dependencies` | Get all assets that an asset depends on |
-| `asset_referencers` | Get all assets that reference a specific asset |
-
-The `asset_search` tool supports:
-- **Class filtering**: Find all Blueprints, Materials, Textures, etc.
-- **Path filtering**: Search within specific content folders
-- **Name patterns**: Match assets by substring
-- **Pagination**: Handle large result sets with limit/offset
-
-#### Async Task Queue
-
-For long-running operations that might timeout, use the async task system:
-
-| Tool | Description |
-|------|-------------|
-| `task_submit` | Submit any tool for async background execution |
-| `task_status` | Poll task status (pending/running/completed/failed) |
-| `task_result` | Get full result of a completed task |
-| `task_list` | List all tasks with queue statistics |
-| `task_cancel` | Cancel a pending or running task |
-
-**Async Workflow Example:**
-```
-1. task_submit(tool_name="asset_search", params={class_filter:"Blueprint"}, timeout_ms=300000)
-   → Returns: {task_id: "abc123...", status: "pending"}
-
-2. task_status(task_id="abc123...")
-   → Returns: {status: "running", progress: 50}
-
-3. task_result(task_id="abc123...")
-   → Returns: {success: true, data: {...}}
-```
-
-Task queue features:
-- **Configurable timeout**: Default 2 minutes, customizable per-task
-- **Concurrent execution**: Up to 4 tasks run in parallel
-- **Automatic cleanup**: Old results cleared after 5 minutes
-- **Cancellation support**: Cancel pending or running tasks
-
-#### Utility Tools
-
-| Tool | Description |
-|------|-------------|
-| `run_console_command` | Execute Unreal console commands |
-| `get_output_log` | Read recent output log entries with optional filtering |
-| `capture_viewport` | Capture viewport screenshot |
-| `execute_script` | Execute Python/BP scripts with permission |
+**Tool Categories:**
+- **Actor Tools** - Spawn, move, delete, inspect, and set properties on actors
+- **Level Management** - Open levels, create new levels from templates, list available templates
+- **Blueprint Tools** - Create and modify Blueprints (variables, functions, nodes, pins)
+- **Animation Blueprint Tools** - Full state machine editing (states, transitions, conditions, batch operations)
+- **Asset Tools** - Search assets, query dependencies and referencers with pagination
+- **Character Tools** - Character configuration, movement settings, and data queries
+- **Material Tools** - Material and material instance operations
+- **Enhanced Input Tools** - Input action and mapping context management
+- **Utility Tools** - Console commands, output log, viewport capture, script execution
+- **Async Task Queue** - Background execution for long-running operations
 
 <img width="707" height="542" alt="{AB6AC101-4A4C-4607-BFB6-187D49F5E65B}" src="https://github.com/user-attachments/assets/e0c2e398-8fcd-4ac6-ade7-d50870215ec1" />
 
-
-The MCP server runs on port 3000 by default and starts automatically when the editor loads.
+For full MCP tool documentation with parameters, examples, and API details, see the [UnrealClaude MCP Bridge](https://github.com/Natfii/unrealclaude-mcp-bridge) repository.
 
 #### Dynamic UE 5.7 Context System
 
@@ -420,7 +266,6 @@ If Claude says the MCP tools are in its instructions but not in its function lis
 Feel free to fork for your own needs! Possible areas for improvement:
 
 - [ ] Mac/Linux support
-- [ ] Streaming output display
 - [ ] Context menu integration (right-click on code)
 - [ ] Blueprint node for runtime Claude queries
 - [ ] Additional MCP tools

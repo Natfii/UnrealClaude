@@ -24,6 +24,9 @@ struct UNREALCLAUDE_API FClaudePromptOptions
 	/** Optional callback for streaming output progress */
 	FOnClaudeProgress OnProgress;
 
+	/** Optional callback for structured NDJSON stream events */
+	FOnClaudeStreamEvent OnStreamEvent;
+
 	/** Optional paths to attached clipboard images (PNG) */
 	TArray<FString> AttachedImagePaths;
 

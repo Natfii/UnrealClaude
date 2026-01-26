@@ -271,6 +271,82 @@ Available via `spawn_actor`, `move_actor`, `delete_actors`, `get_level_actors`:
 | `get_level_actors` | List actors with optional filtering |
 | `set_property` | Modify actor properties |
 
+## Level Management
+
+### Loading Levels in Editor (UE 5.7)
+
+The `open_level` MCP tool provides level management without console commands.
+
+```cpp
+#include "FileHelpers.h"
+#include "Editor/UnrealEdEngine.h"
+#include "UnrealEdGlobals.h"
+
+// Load an existing map by filename
+// Engine handles save prompt internally before switching
+FString Filename;
+FPackageName::TryConvertLongPackageNameToFilename(
+    TEXT("/Game/Maps/MyLevel"), Filename, FPackageName::GetMapPackageExtension());
+UWorld* LoadedWorld = UEditorLoadingAndSavingUtils::LoadMap(Filename);
+
+// Create a new blank map
+// bSaveCurrent: if true, prompts user to save current level first
+UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(/*bSaveCurrent=*/true);
+
+// Check if a package exists before attempting to load
+bool bExists = FPackageName::DoesPackageExist(TEXT("/Game/Maps/MyLevel"));
+```
+
+### Map Templates (UE 5.7)
+
+```cpp
+// Access available map templates via GUnrealEd
+if (GUnrealEd)
+{
+    const TArray<FTemplateMapInfo>& Templates = GUnrealEd->GetTemplateMapInfos();
+    for (const FTemplateMapInfo& Template : Templates)
+    {
+        FString DisplayName = FPaths::GetBaseFilename(Template.Map.ToString());
+        FString MapPath = Template.Map.ToString();
+        // Template.ThumbnailTexture contains preview image path
+    }
+}
+
+// Load a template map (same API as opening existing maps)
+FString TemplateFilename;
+FPackageName::TryConvertLongPackageNameToFilename(
+    TemplatePackageName, TemplateFilename, FPackageName::GetMapPackageExtension());
+UWorld* NewWorld = UEditorLoadingAndSavingUtils::LoadMap(TemplateFilename);
+```
+
+### World Info After Loading
+```cpp
+if (LoadedWorld)
+{
+    FString MapName = LoadedWorld->GetMapName();       // e.g., "MyLevel"
+    FString WorldName = LoadedWorld->GetName();         // e.g., "MyLevel"
+    FString PackageName = LoadedWorld->GetOutermost()->GetName(); // Full package path
+}
+```
+
+### Level Path Validation
+Level paths used with MCP tools must:
+- Start with `/Game/` (project content only)
+- Not contain path traversal (`..`)
+- Not reference `/Engine/` or `/Script/` paths
+- Not exceed 512 characters
+- Not contain dangerous characters (`<>|&;$(){}[]!*?~`)
+
+### MCP Level Operations
+
+Available via `open_level`:
+
+| Action | Parameters | Description |
+|--------|-----------|-------------|
+| `open` | `level_path` (required) | Load an existing map by asset path (e.g., `/Game/Maps/MyLevel`) |
+| `new` | `template` (optional), `save_current` (optional) | Create a new blank map or from a named template |
+| `list_templates` | (none) | List all available map templates with names and paths |
+
 ## Best Practices
 
 1. **Always use IsValid()** before accessing actors
@@ -278,3 +354,6 @@ Available via `spawn_actor`, `move_actor`, `delete_actors`, `get_level_actors`:
 3. **RegisterComponent()** after creating components at runtime
 4. **Clean up timers** in EndPlay to prevent crashes
 5. **Use FAttachmentTransformRules** explicitly for clarity
+6. **Use `open_level` tool** instead of console commands for level switching
+7. **Use `list_templates`** before creating template-based maps to discover available options
+8. **Check `asset_search`** for map assets before attempting to open a level by path

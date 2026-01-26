@@ -1,0 +1,60 @@
+// Copyright Natali Caggiano. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "../MCPToolBase.h"
+
+/**
+ * MCP Tool: Open, create, or list level maps in the editor
+ *
+ * Supports three actions:
+ * - "open": Load an existing map by path
+ * - "new": Create a new blank map or from a template
+ * - "list_templates": List available map templates
+ */
+class FMCPTool_OpenLevel : public FMCPToolBase
+{
+public:
+	virtual FMCPToolInfo GetInfo() const override
+	{
+		FMCPToolInfo Info;
+		Info.Name = TEXT("open_level");
+		Info.Description = TEXT(
+			"Open, create, or list level maps in the Unreal Editor.\n\n"
+			"Actions:\n"
+			"- 'open': Load an existing map by asset path (e.g., '/Game/Maps/MyLevel')\n"
+			"- 'new': Create a new blank map, or from a template if 'template' is specified\n"
+			"- 'list_templates': List all available map templates\n\n"
+			"The editor will prompt to save unsaved changes before switching levels.\n\n"
+			"Returns: The loaded map name and world info, or template list."
+		);
+		Info.Parameters = {
+			FMCPToolParameter(TEXT("action"), TEXT("string"),
+				TEXT("Action to perform: 'open', 'new', or 'list_templates'"), true),
+			FMCPToolParameter(TEXT("level_path"), TEXT("string"),
+				TEXT("Asset path of the level to open (required for 'open' action, e.g., '/Game/Maps/MyLevel')"), false),
+			FMCPToolParameter(TEXT("template"), TEXT("string"),
+				TEXT("Template name for 'new' action (omit for blank map). Use 'list_templates' to see available names."), false),
+			FMCPToolParameter(TEXT("save_current"), TEXT("boolean"),
+				TEXT("For 'new' action: whether to prompt to save the current level first (default: true). The 'open' action always uses the engine's built-in save prompt."), false, TEXT("true"))
+		};
+		Info.Annotations = FMCPToolAnnotations::Modifying();
+		return Info;
+	}
+
+	virtual FMCPToolResult Execute(const TSharedRef<FJsonObject>& Params) override;
+
+private:
+	/** Execute the 'open' action */
+	FMCPToolResult ExecuteOpen(const TSharedRef<FJsonObject>& Params);
+
+	/** Execute the 'new' action */
+	FMCPToolResult ExecuteNew(const TSharedRef<FJsonObject>& Params);
+
+	/** Execute the 'list_templates' action */
+	FMCPToolResult ExecuteListTemplates();
+
+	/** Validate a level asset path for safety */
+	static bool ValidateLevelPath(const FString& Path, FString& OutError);
+};
