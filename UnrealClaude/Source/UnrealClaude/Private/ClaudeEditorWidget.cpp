@@ -256,7 +256,17 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 
 void SClaudeEditorWidget::SendMessage()
 {
-	if (CurrentInputText.IsEmpty() || bIsWaitingForResponse)
+	// Extract image path before checking emptiness
+	FString ImagePath;
+	if (InputArea.IsValid())
+	{
+		ImagePath = InputArea->GetAttachedImagePath();
+	}
+
+	bool bHasText = !CurrentInputText.IsEmpty();
+	bool bHasImage = !ImagePath.IsEmpty();
+
+	if ((!bHasText && !bHasImage) || bIsWaitingForResponse)
 	{
 		return;
 	}
@@ -267,11 +277,28 @@ void SClaudeEditorWidget::SendMessage()
 		return;
 	}
 
-	// Add user message to chat
-	AddMessage(CurrentInputText, true);
+	// Build display message
+	FString DisplayMessage = bHasText ? CurrentInputText : FString();
+	if (bHasImage)
+	{
+		FString FileName = FPaths::GetCleanFilename(ImagePath);
+		if (bHasText)
+		{
+			DisplayMessage += FString::Printf(TEXT("\n[Attached image: %s]"), *FileName);
+		}
+		else
+		{
+			DisplayMessage = FString::Printf(TEXT("[Attached image: %s]"), *FileName);
+		}
+	}
 
-	// Save and clear input
-	FString Prompt = CurrentInputText;
+	// Add user message to chat
+	AddMessage(DisplayMessage, true);
+
+	// Build prompt - use default if image-only
+	FString Prompt = bHasText ? CurrentInputText : TEXT("Please analyze this image.");
+
+	// Clear input
 	CurrentInputText.Empty();
 	if (InputArea.IsValid())
 	{
@@ -284,14 +311,17 @@ void SClaudeEditorWidget::SendMessage()
 	// Start streaming response display
 	StartStreamingResponse();
 
-	// Send to Claude with progress callback
+	// Send to Claude using FClaudePromptOptions
 	FOnClaudeResponse OnComplete;
 	OnComplete.BindSP(this, &SClaudeEditorWidget::OnClaudeResponse);
 
-	FOnClaudeProgress OnProgress;
-	OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
+	FClaudePromptOptions Options;
+	Options.bIncludeEngineContext = bIncludeUE57Context;
+	Options.bIncludeProjectContext = bIncludeProjectContext;
+	Options.OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
+	Options.AttachedImagePath = ImagePath;
 
-	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, bIncludeUE57Context, OnProgress, bIncludeProjectContext);
+	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, Options);
 }
 
 void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSuccess)

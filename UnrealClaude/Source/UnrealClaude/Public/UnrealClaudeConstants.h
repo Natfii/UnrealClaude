@@ -195,4 +195,17 @@ namespace UnrealClaudeConstants
 			TEXT("task_cancel")
 		};
 	}
+
+	// Clipboard Image Paste
+	namespace ClipboardImage
+	{
+		/** Maximum age of saved clipboard screenshots before cleanup (seconds) */
+		constexpr double MaxScreenshotAgeSeconds = 3600.0;
+
+		/** Subdirectory under Saved/UnrealClaude/ for clipboard screenshots */
+		static const TCHAR* ScreenshotSubdirectory = TEXT("screenshots");
+
+		/** Thumbnail preview size in the input area (pixels) */
+		constexpr float ThumbnailSize = 64.0f;
+	}
 }

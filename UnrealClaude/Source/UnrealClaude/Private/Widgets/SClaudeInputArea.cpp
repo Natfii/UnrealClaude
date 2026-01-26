@@ -1,10 +1,13 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "SClaudeInputArea.h"
+#include "ClipboardImageUtils.h"
+#include "UnrealClaudeConstants.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
@@ -18,10 +21,67 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 	OnSend = InArgs._OnSend;
 	OnCancel = InArgs._OnCancel;
 	OnTextChangedDelegate = InArgs._OnTextChanged;
+	OnImageAttachedDelegate = InArgs._OnImageAttached;
+	OnImageRemovedDelegate = InArgs._OnImageRemoved;
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
+
+		// Image preview row (starts collapsed)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+		[
+			SAssignNew(ImagePreviewRow, SHorizontalBox)
+			.Visibility(EVisibility::Collapsed)
+
+			// Image icon placeholder
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SBox)
+				.WidthOverride(UnrealClaudeConstants::ClipboardImage::ThumbnailSize)
+				.HeightOverride(UnrealClaudeConstants::ClipboardImage::ThumbnailSize)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("ImageIcon", "[IMG]"))
+						.TextStyle(FAppStyle::Get(), "SmallText")
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+					]
+				]
+			]
+
+			// File name label
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SAssignNew(ImageFileNameText, STextBlock)
+				.TextStyle(FAppStyle::Get(), "SmallText")
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
+			]
+
+			// Remove button
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("RemoveImage", "X"))
+				.OnClicked(this, &SClaudeInputArea::HandleRemoveImageClicked)
+				.ToolTipText(LOCTEXT("RemoveImageTip", "Remove attached image"))
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			]
+		]
 
 		// Input row
 		+ SVerticalBox::Slot()
@@ -70,7 +130,7 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 					SNew(SButton)
 					.Text(LOCTEXT("Paste", "Paste"))
 					.OnClicked(this, &SClaudeInputArea::HandlePasteClicked)
-					.ToolTipText(LOCTEXT("PasteTip", "Paste text from clipboard (supports large text)"))
+					.ToolTipText(LOCTEXT("PasteTip", "Paste text or image from clipboard"))
 					.IsEnabled_Lambda([this]() { return !bIsWaiting.Get(); })
 				]
 
@@ -129,10 +189,38 @@ void SClaudeInputArea::ClearText()
 	{
 		InputTextBox->SetText(FText::GetEmpty());
 	}
+	ClearAttachedImage();
+}
+
+bool SClaudeInputArea::HasAttachedImage() const
+{
+	return !AttachedImagePath.IsEmpty();
+}
+
+FString SClaudeInputArea::GetAttachedImagePath() const
+{
+	return AttachedImagePath;
+}
+
+void SClaudeInputArea::ClearAttachedImage()
+{
+	AttachedImagePath.Empty();
+	HideImagePreview();
 }
 
 FReply SClaudeInputArea::OnInputKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	// Ctrl+V: try image paste first, fall back to text paste
+	if (InKeyEvent.GetKey() == EKeys::V && InKeyEvent.IsControlDown())
+	{
+		if (TryPasteImageFromClipboard())
+		{
+			return FReply::Handled();
+		}
+		// Return unhandled to let default text paste proceed
+		return FReply::Unhandled();
+	}
+
 	// Enter (without Shift) to send
 	// Shift+Enter allows newline
 	if (InKeyEvent.GetKey() == EKeys::Enter)
@@ -160,6 +248,13 @@ void SClaudeInputArea::HandleTextCommitted(const FText& NewText, ETextCommit::Ty
 
 FReply SClaudeInputArea::HandlePasteClicked()
 {
+	// Try image paste first
+	if (TryPasteImageFromClipboard())
+	{
+		return FReply::Handled();
+	}
+
+	// Fall back to text paste
 	FString ClipboardText;
 	FPlatformApplicationMisc::ClipboardPaste(ClipboardText);
 	if (!ClipboardText.IsEmpty() && InputTextBox.IsValid())
@@ -182,6 +277,63 @@ FReply SClaudeInputArea::HandleSendCancelClicked()
 		OnSend.ExecuteIfBound();
 	}
 	return FReply::Handled();
+}
+
+bool SClaudeInputArea::TryPasteImageFromClipboard()
+{
+	if (!FClipboardImageUtils::ClipboardHasImage())
+	{
+		return false;
+	}
+
+	// Clean up old screenshots before saving a new one
+	FString ScreenshotDir = FClipboardImageUtils::GetScreenshotDirectory();
+	FClipboardImageUtils::CleanupOldScreenshots(
+		ScreenshotDir,
+		UnrealClaudeConstants::ClipboardImage::MaxScreenshotAgeSeconds);
+
+	FString SavedPath;
+	if (!FClipboardImageUtils::SaveClipboardImageToFile(SavedPath, ScreenshotDir))
+	{
+		return false;
+	}
+
+	AttachedImagePath = SavedPath;
+	ShowImagePreview(FPaths::GetCleanFilename(SavedPath));
+
+	OnImageAttachedDelegate.ExecuteIfBound(AttachedImagePath);
+	return true;
+}
+
+FReply SClaudeInputArea::HandleRemoveImageClicked()
+{
+	ClearAttachedImage();
+	OnImageRemovedDelegate.ExecuteIfBound();
+	return FReply::Handled();
+}
+
+void SClaudeInputArea::ShowImagePreview(const FString& FileName)
+{
+	if (ImagePreviewRow.IsValid())
+	{
+		ImagePreviewRow->SetVisibility(EVisibility::Visible);
+	}
+	if (ImageFileNameText.IsValid())
+	{
+		ImageFileNameText->SetText(FText::FromString(FileName));
+	}
+}
+
+void SClaudeInputArea::HideImagePreview()
+{
+	if (ImagePreviewRow.IsValid())
+	{
+		ImagePreviewRow->SetVisibility(EVisibility::Collapsed);
+	}
+	if (ImageFileNameText.IsValid())
+	{
+		ImageFileNameText->SetText(FText::GetEmpty());
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

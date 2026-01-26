@@ -24,6 +24,9 @@ struct UNREALCLAUDE_API FClaudePromptOptions
 	/** Optional callback for streaming output progress */
 	FOnClaudeProgress OnProgress;
 
+	/** Optional path to an attached clipboard image (PNG) */
+	FString AttachedImagePath;
+
 	/** Default constructor with sensible defaults */
 	FClaudePromptOptions() = default;
 

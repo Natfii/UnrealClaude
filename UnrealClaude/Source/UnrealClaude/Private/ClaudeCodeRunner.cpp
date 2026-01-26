@@ -777,6 +777,18 @@ void FClaudeCodeRunner::ExecuteProcess()
 			}
 		}
 
+		// Add image attachment instruction if present
+		if (!CurrentConfig.AttachedImagePath.IsEmpty())
+		{
+			FString NormalizedPath = CurrentConfig.AttachedImagePath;
+			NormalizedPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+			FullPrompt += FString::Printf(
+				TEXT("The user has attached an image from their clipboard. ")
+				TEXT("First, use the Read tool to read the image file at: %s\n")
+				TEXT("Then respond to their message while considering the image content.\n\n"),
+				*NormalizedPath);
+		}
+
 		// Add user prompt
 		if (!PromptFilePath.IsEmpty())
 		{

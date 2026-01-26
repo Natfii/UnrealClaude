@@ -7,13 +7,16 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 
 class SMultiLineEditableTextBox;
+class SHorizontalBox;
+class STextBlock;
 
 DECLARE_DELEGATE(FOnInputAction)
 DECLARE_DELEGATE_OneParam(FOnTextChangedEvent, const FString&)
+DECLARE_DELEGATE_OneParam(FOnImageAttached, const FString&)
 
 /**
  * Input area widget for Claude Editor
- * Handles multi-line text input with paste, send/cancel buttons
+ * Handles multi-line text input with paste, send/cancel buttons, and image attachment
  */
 class SClaudeInputArea : public SCompoundWidget
 {
@@ -25,6 +28,8 @@ public:
 		SLATE_EVENT(FOnInputAction, OnSend)
 		SLATE_EVENT(FOnInputAction, OnCancel)
 		SLATE_EVENT(FOnTextChangedEvent, OnTextChanged)
+		SLATE_EVENT(FOnImageAttached, OnImageAttached)
+		SLATE_EVENT(FOnInputAction, OnImageRemoved)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -37,6 +42,15 @@ public:
 
 	/** Clear the input */
 	void ClearText();
+
+	/** Check if an image is currently attached */
+	bool HasAttachedImage() const;
+
+	/** Get the attached image file path */
+	FString GetAttachedImagePath() const;
+
+	/** Clear the attached image */
+	void ClearAttachedImage();
 
 private:
 	/** Handle key down in input box */
@@ -54,12 +68,35 @@ private:
 	/** Handle send/cancel button click */
 	FReply HandleSendCancelClicked();
 
+	/** Try to paste an image from clipboard. Returns true if image was found and attached. */
+	bool TryPasteImageFromClipboard();
+
+	/** Handle remove image button click */
+	FReply HandleRemoveImageClicked();
+
+	/** Show the image preview row */
+	void ShowImagePreview(const FString& FileName);
+
+	/** Hide the image preview row */
+	void HideImagePreview();
+
 private:
 	TSharedPtr<SMultiLineEditableTextBox> InputTextBox;
 	FString CurrentInputText;
+
+	/** Attached image file path */
+	FString AttachedImagePath;
+
+	/** Image preview row (collapsed when no image) */
+	TSharedPtr<SHorizontalBox> ImagePreviewRow;
+
+	/** Image file name display */
+	TSharedPtr<STextBlock> ImageFileNameText;
 
 	TAttribute<bool> bIsWaiting;
 	FOnInputAction OnSend;
 	FOnInputAction OnCancel;
 	FOnTextChangedEvent OnTextChangedDelegate;
+	FOnImageAttached OnImageAttachedDelegate;
+	FOnInputAction OnImageRemovedDelegate;
 };
