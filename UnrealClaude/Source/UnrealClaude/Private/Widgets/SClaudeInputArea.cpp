@@ -3,15 +3,21 @@
 #include "SClaudeInputArea.h"
 #include "ClipboardImageUtils.h"
 #include "UnrealClaudeConstants.h"
+#include "UnrealClaudeModule.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
+#include "Brushes/SlateDynamicImageBrush.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/FileHelper.h"
+#include "IImageWrapperModule.h"
+#include "IImageWrapper.h"
 
 #define LOCTEXT_NAMESPACE "UnrealClaude"
 
@@ -36,7 +42,7 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 			SAssignNew(ImagePreviewRow, SHorizontalBox)
 			.Visibility(EVisibility::Collapsed)
 
-			// Image icon placeholder
+			// Image thumbnail
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
@@ -48,13 +54,10 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 				[
 					SNew(SBorder)
 					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.HAlign(HAlign_Center)
-					.VAlign(VAlign_Center)
+					.HAlign(HAlign_Fill)
+					.VAlign(VAlign_Fill)
 					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("ImageIcon", "[IMG]"))
-						.TextStyle(FAppStyle::Get(), "SmallText")
-						.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
+						SAssignNew(ThumbnailImage, SImage)
 					]
 				]
 			]
@@ -299,7 +302,7 @@ bool SClaudeInputArea::TryPasteImageFromClipboard()
 	}
 
 	AttachedImagePath = SavedPath;
-	ShowImagePreview(FPaths::GetCleanFilename(SavedPath));
+	ShowImagePreview(SavedPath);
 
 	OnImageAttachedDelegate.ExecuteIfBound(AttachedImagePath);
 	return true;
@@ -312,20 +315,34 @@ FReply SClaudeInputArea::HandleRemoveImageClicked()
 	return FReply::Handled();
 }
 
-void SClaudeInputArea::ShowImagePreview(const FString& FileName)
+void SClaudeInputArea::ShowImagePreview(const FString& FilePath)
 {
+	// Try to create a thumbnail brush from the saved PNG
+	ThumbnailBrush = CreateThumbnailBrush(FilePath);
+	if (ThumbnailBrush.IsValid() && ThumbnailImage.IsValid())
+	{
+		ThumbnailImage->SetImage(ThumbnailBrush.Get());
+	}
+
 	if (ImagePreviewRow.IsValid())
 	{
 		ImagePreviewRow->SetVisibility(EVisibility::Visible);
 	}
 	if (ImageFileNameText.IsValid())
 	{
-		ImageFileNameText->SetText(FText::FromString(FileName));
+		ImageFileNameText->SetText(FText::FromString(FPaths::GetCleanFilename(FilePath)));
 	}
 }
 
 void SClaudeInputArea::HideImagePreview()
 {
+	// Release the thumbnail brush
+	if (ThumbnailImage.IsValid())
+	{
+		ThumbnailImage->SetImage(nullptr);
+	}
+	ThumbnailBrush.Reset();
+
 	if (ImagePreviewRow.IsValid())
 	{
 		ImagePreviewRow->SetVisibility(EVisibility::Collapsed);
@@ -334,6 +351,56 @@ void SClaudeInputArea::HideImagePreview()
 	{
 		ImageFileNameText->SetText(FText::GetEmpty());
 	}
+}
+
+TSharedPtr<FSlateDynamicImageBrush> SClaudeInputArea::CreateThumbnailBrush(const FString& FilePath) const
+{
+	// Load PNG file from disk
+	TArray<uint8> PngData;
+	if (!FFileHelper::LoadFileToArray(PngData, *FilePath))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image for thumbnail: %s"), *FilePath);
+		return nullptr;
+	}
+
+	// Decompress PNG to raw pixels
+	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+
+	if (!ImageWrapper.IsValid())
+	{
+		return nullptr;
+	}
+
+	if (!ImageWrapper->SetCompressed(PngData.GetData(), PngData.Num()))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to decompress PNG for thumbnail"));
+		return nullptr;
+	}
+
+	TArray<uint8> RawData;
+	if (!ImageWrapper->GetRaw(ERGBFormat::BGRA, 8, RawData))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to get raw pixel data for thumbnail"));
+		return nullptr;
+	}
+
+	const int32 Width = ImageWrapper->GetWidth();
+	const int32 Height = ImageWrapper->GetHeight();
+
+	if (Width <= 0 || Height <= 0)
+	{
+		return nullptr;
+	}
+
+	// Create a dynamic brush from the raw pixel data
+	FName BrushName = FName(*FString::Printf(TEXT("ClipboardThumb_%s"), *FPaths::GetBaseFilename(FilePath)));
+	TSharedPtr<FSlateDynamicImageBrush> Brush = FSlateDynamicImageBrush::CreateWithImageData(
+		BrushName,
+		FVector2D(Width, Height),
+		TArray<uint8>(RawData));
+
+	return Brush;
 }
 
 #undef LOCTEXT_NAMESPACE

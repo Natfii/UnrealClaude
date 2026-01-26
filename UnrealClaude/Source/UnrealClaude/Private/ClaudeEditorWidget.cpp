@@ -328,15 +328,21 @@ void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSucces
 {
 	bIsWaitingForResponse = false;
 
-	// Finalize the streaming response
-	FinalizeStreamingResponse();
-
 	if (bSuccess)
 	{
-		// Use the streamed response if we have one, otherwise use the final response
+		// If we have a streaming bubble but no progress was received (e.g., image mode
+		// suppresses progress callbacks), populate it with the final response so
+		// FinalizeStreamingResponse updates the existing bubble instead of leaving "Thinking..."
+		if (StreamingResponse.IsEmpty() && StreamingTextBlock.IsValid())
+		{
+			StreamingResponse = Response;
+		}
+
+		FinalizeStreamingResponse();
+
 		LastResponse = StreamingResponse.IsEmpty() ? Response : StreamingResponse;
 
-		// If streaming didn't show anything, add the final response
+		// Only add a new bubble if we had no streaming bubble at all
 		if (StreamingResponse.IsEmpty())
 		{
 			AddMessage(Response, false);
@@ -344,6 +350,7 @@ void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSucces
 	}
 	else
 	{
+		FinalizeStreamingResponse();
 		AddMessage(FString::Printf(TEXT("Error: %s"), *Response), false);
 	}
 

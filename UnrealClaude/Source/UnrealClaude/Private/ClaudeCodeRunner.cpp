@@ -9,6 +9,7 @@
 #include "Misc/Paths.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Base64.h"
 #include "Async/Async.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -385,7 +386,7 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 	// Print mode (non-interactive)
 	CommandLine += TEXT("-p ");
 
-	// Verbose mode to show thinking
+	// Verbose mode to show thinking (required by stream-json output format)
 	CommandLine += TEXT("--verbose ");
 
 	// Skip permissions if requested
@@ -394,8 +395,8 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += TEXT("--dangerously-skip-permissions ");
 	}
 
-	// JSON output if requested
-	if (Config.bUseJsonOutput)
+	// JSON output if requested (but not when image attached -- stream-json overrides)
+	if (Config.bUseJsonOutput && Config.AttachedImagePath.IsEmpty())
 	{
 		CommandLine += TEXT("--output-format json ");
 	}
@@ -446,6 +447,13 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += FString::Printf(TEXT("--allowedTools \"%s\" "), *FString::Join(AllTools, TEXT(",")));
 	}
 
+	// Use stream-json input/output format when image is attached (required for multimodal content)
+	// Claude CLI requires both input and output to use stream-json together
+	if (!Config.AttachedImagePath.IsEmpty())
+	{
+		CommandLine += TEXT("--input-format stream-json --output-format stream-json ");
+	}
+
 	// Write prompts to files to avoid command line length limits (Error 206)
 	FString TempDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"));
 	IFileManager::Get().MakeDirectory(*TempDir, true);
@@ -471,6 +479,197 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 
 	// Don't add prompts to command line - we'll pipe them via stdin
 	return CommandLine;
+}
+
+FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, const FString& ImagePath)
+{
+	// Validate the image path is within the expected screenshots directory
+	FString ExpectedDir = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("screenshots")));
+	FString FullImagePath = FPaths::ConvertRelativePathToFull(ImagePath);
+
+	bool bImageValid = false;
+	FString Base64ImageData;
+
+	if (!FullImagePath.StartsWith(ExpectedDir))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
+	}
+	else if (!FPaths::FileExists(FullImagePath))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Attached image file no longer exists: %s"), *FullImagePath);
+	}
+	else
+	{
+		// Load and base64 encode the PNG
+		TArray<uint8> ImageData;
+		if (FFileHelper::LoadFileToArray(ImageData, *FullImagePath))
+		{
+			Base64ImageData = FBase64::Encode(ImageData);
+			bImageValid = true;
+			UE_LOG(LogUnrealClaude, Log, TEXT("Base64 encoded image: %s (%d bytes -> %d chars)"),
+				*FullImagePath, ImageData.Num(), Base64ImageData.Len());
+		}
+		else
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image file for base64 encoding: %s"), *FullImagePath);
+		}
+	}
+
+	// Build content blocks array
+	TArray<TSharedPtr<FJsonValue>> ContentArray;
+
+	// Text content block (system context + user message)
+	if (!TextPrompt.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> TextBlock = MakeShared<FJsonObject>();
+		TextBlock->SetStringField(TEXT("type"), TEXT("text"));
+		TextBlock->SetStringField(TEXT("text"), TextPrompt);
+		ContentArray.Add(MakeShared<FJsonValueObject>(TextBlock));
+	}
+
+	// Image content block (base64-encoded PNG)
+	if (bImageValid)
+	{
+		TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
+		Source->SetStringField(TEXT("type"), TEXT("base64"));
+		Source->SetStringField(TEXT("media_type"), TEXT("image/png"));
+		Source->SetStringField(TEXT("data"), Base64ImageData);
+
+		TSharedPtr<FJsonObject> ImageBlock = MakeShared<FJsonObject>();
+		ImageBlock->SetStringField(TEXT("type"), TEXT("image"));
+		ImageBlock->SetObjectField(TEXT("source"), Source);
+		ContentArray.Add(MakeShared<FJsonValueObject>(ImageBlock));
+	}
+
+	// Build the inner message object: {"role":"user","content":[...]}
+	TSharedPtr<FJsonObject> Message = MakeShared<FJsonObject>();
+	Message->SetStringField(TEXT("role"), TEXT("user"));
+	Message->SetArrayField(TEXT("content"), ContentArray);
+
+	// Build the outer SDKUserMessage envelope: {"type":"user","message":{...}}
+	TSharedPtr<FJsonObject> Envelope = MakeShared<FJsonObject>();
+	Envelope->SetStringField(TEXT("type"), TEXT("user"));
+	Envelope->SetObjectField(TEXT("message"), Message);
+
+	// Serialize to condensed JSON (single line for NDJSON)
+	FString JsonLine;
+	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JsonLine);
+	FJsonSerializer::Serialize(Envelope.ToSharedRef(), Writer);
+	Writer->Close();
+
+	// NDJSON requires newline termination
+	JsonLine += TEXT("\n");
+
+	UE_LOG(LogUnrealClaude, Log, TEXT("Built stream-json payload: %d chars (image: %s)"),
+		JsonLine.Len(), bImageValid ? TEXT("yes") : TEXT("no"));
+
+	return JsonLine;
+}
+
+FString FClaudeCodeRunner::ParseStreamJsonOutput(const FString& RawOutput)
+{
+	// Stream-json output is NDJSON: one JSON object per line
+	// We look for the "result" message which contains the final response text
+	// Format: {"type":"result","result":"the text response",...}
+	// Fallback: accumulate text from "assistant" content blocks
+
+	TArray<FString> Lines;
+	RawOutput.ParseIntoArrayLines(Lines);
+
+	// First pass: look for the "result" message
+	for (const FString& Line : Lines)
+	{
+		if (Line.IsEmpty())
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> JsonObj;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Line);
+		if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
+		{
+			continue;
+		}
+
+		FString Type;
+		if (!JsonObj->TryGetStringField(TEXT("type"), Type))
+		{
+			continue;
+		}
+
+		if (Type == TEXT("result"))
+		{
+			FString ResultText;
+			if (JsonObj->TryGetStringField(TEXT("result"), ResultText))
+			{
+				UE_LOG(LogUnrealClaude, Log, TEXT("Parsed stream-json result: %d chars"), ResultText.Len());
+				return ResultText;
+			}
+		}
+	}
+
+	// Fallback: accumulate text from assistant content blocks
+	FString AccumulatedText;
+	for (const FString& Line : Lines)
+	{
+		if (Line.IsEmpty())
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> JsonObj;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Line);
+		if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
+		{
+			continue;
+		}
+
+		FString Type;
+		if (!JsonObj->TryGetStringField(TEXT("type"), Type))
+		{
+			continue;
+		}
+
+		if (Type == TEXT("assistant"))
+		{
+			const TSharedPtr<FJsonObject>* MessageObj;
+			if (JsonObj->TryGetObjectField(TEXT("message"), MessageObj))
+			{
+				const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+				if ((*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+				{
+					for (const TSharedPtr<FJsonValue>& ContentValue : *ContentArray)
+					{
+						const TSharedPtr<FJsonObject>* ContentObj;
+						if (ContentValue->TryGetObject(ContentObj))
+						{
+							FString ContentType;
+							if ((*ContentObj)->TryGetStringField(TEXT("type"), ContentType) && ContentType == TEXT("text"))
+							{
+								FString Text;
+								if ((*ContentObj)->TryGetStringField(TEXT("text"), Text))
+								{
+									AccumulatedText += Text;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (!AccumulatedText.IsEmpty())
+	{
+		UE_LOG(LogUnrealClaude, Log, TEXT("Parsed stream-json from assistant blocks: %d chars"), AccumulatedText.Len());
+		return AccumulatedText;
+	}
+
+	// Last resort: return the raw output (shouldn't normally happen)
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse stream-json output, returning raw (%d chars)"), RawOutput.Len());
+	return RawOutput;
 }
 
 void FClaudeCodeRunner::Cancel()
@@ -631,6 +830,10 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 	HANDLE StdOutReadPipe = static_cast<HANDLE>(ReadPipe);
 	HANDLE hProcess = static_cast<HANDLE>(ProcessHandle);
 
+	// When using stream-json (image attachment), suppress progress callbacks since
+	// the raw output is NDJSON that must be parsed before display
+	bool bSuppressProgress = !CurrentConfig.AttachedImagePath.IsEmpty();
+
 	while (!StopTaskCounter.GetValue())
 	{
 		// Check if process is done
@@ -643,8 +846,8 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 			FString OutputChunk = UTF8_TO_TCHAR(Buffer);
 			FullOutput += OutputChunk;
 
-			// Report progress
-			if (OnProgressDelegate.IsBound())
+			// Report progress (skip for stream-json mode to avoid displaying raw NDJSON)
+			if (!bSuppressProgress && OnProgressDelegate.IsBound())
 			{
 				FOnClaudeProgress ProgressCopy = OnProgressDelegate;
 				FString ProgressChunk = OutputChunk;
@@ -765,48 +968,49 @@ void FClaudeCodeRunner::ExecuteProcess()
 	HANDLE StdInWrite = static_cast<HANDLE>(StdInWritePipe);
 	if (StdInWrite)
 	{
-		FString FullPrompt;
+		FString StdinPayload;
+		bool bHasImageAttachment = !CurrentConfig.AttachedImagePath.IsEmpty();
 
-		// Include system prompt context if present
+		// Build the text portion of the prompt (system context + user message)
+		FString TextPrompt;
 		if (!SystemPromptFilePath.IsEmpty())
 		{
 			FString SystemPromptContent;
 			if (FFileHelper::LoadFileToString(SystemPromptContent, *SystemPromptFilePath))
 			{
-				FullPrompt = FString::Printf(TEXT("[CONTEXT]\n%s\n[/CONTEXT]\n\n"), *SystemPromptContent);
+				TextPrompt = FString::Printf(TEXT("[CONTEXT]\n%s\n[/CONTEXT]\n\n"), *SystemPromptContent);
 			}
 		}
-
-		// Add image attachment instruction if present
-		if (!CurrentConfig.AttachedImagePath.IsEmpty())
-		{
-			FString NormalizedPath = CurrentConfig.AttachedImagePath;
-			NormalizedPath.ReplaceInline(TEXT("\\"), TEXT("/"));
-			FullPrompt += FString::Printf(
-				TEXT("The user has attached an image from their clipboard. ")
-				TEXT("First, use the Read tool to read the image file at: %s\n")
-				TEXT("Then respond to their message while considering the image content.\n\n"),
-				*NormalizedPath);
-		}
-
-		// Add user prompt
 		if (!PromptFilePath.IsEmpty())
 		{
 			FString PromptContent;
 			if (FFileHelper::LoadFileToString(PromptContent, *PromptFilePath))
 			{
-				FullPrompt += PromptContent;
+				TextPrompt += PromptContent;
 			}
 		}
 
-		// Write combined prompt to stdin
-		if (!FullPrompt.IsEmpty())
+		if (bHasImageAttachment)
 		{
-			FTCHARToUTF8 Utf8Prompt(*FullPrompt);
+			// Stream-json mode: build NDJSON with multimodal content blocks (text + base64 image)
+			StdinPayload = BuildStreamJsonPayload(TextPrompt, CurrentConfig.AttachedImagePath);
+		}
+		else
+		{
+			// Plain text mode: pipe the text directly
+			StdinPayload = TextPrompt;
+		}
+
+		// Write to stdin
+		if (!StdinPayload.IsEmpty())
+		{
+			FTCHARToUTF8 Utf8Payload(*StdinPayload);
 			DWORD BytesWritten;
-			WriteFile(StdInWrite, Utf8Prompt.Get(), Utf8Prompt.Length(), &BytesWritten, NULL);
-			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote %d bytes to Claude stdin (system: %d chars, user: %d chars)"),
-				BytesWritten, CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
+			WriteFile(StdInWrite, Utf8Payload.Get(), Utf8Payload.Length(), &BytesWritten, NULL);
+			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote %d bytes to Claude stdin (format: %s, system: %d chars, user: %d chars)"),
+				BytesWritten,
+				bHasImageAttachment ? TEXT("stream-json") : TEXT("text"),
+				CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
 		}
 
 		// Close stdin write pipe to signal EOF to Claude
@@ -820,6 +1024,12 @@ void FClaudeCodeRunner::ExecuteProcess()
 
 	// Read output until process completes
 	FString FullOutput = ReadProcessOutput();
+
+	// If stream-json output was used (image attachment), parse NDJSON to extract text
+	if (!CurrentConfig.AttachedImagePath.IsEmpty())
+	{
+		FullOutput = ParseStreamJsonOutput(FullOutput);
+	}
 
 	// Get exit code
 	DWORD ExitCode;

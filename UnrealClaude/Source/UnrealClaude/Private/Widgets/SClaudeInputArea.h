@@ -5,10 +5,12 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
+#include "Brushes/SlateDynamicImageBrush.h"
 
 class SMultiLineEditableTextBox;
 class SHorizontalBox;
 class STextBlock;
+class SImage;
 
 DECLARE_DELEGATE(FOnInputAction)
 DECLARE_DELEGATE_OneParam(FOnTextChangedEvent, const FString&)
@@ -74,11 +76,14 @@ private:
 	/** Handle remove image button click */
 	FReply HandleRemoveImageClicked();
 
-	/** Show the image preview row */
-	void ShowImagePreview(const FString& FileName);
+	/** Show the image preview row with thumbnail loaded from the saved PNG */
+	void ShowImagePreview(const FString& FilePath);
 
-	/** Hide the image preview row */
+	/** Hide the image preview row and release thumbnail brush */
 	void HideImagePreview();
+
+	/** Create a dynamic image brush from a PNG file on disk */
+	TSharedPtr<FSlateDynamicImageBrush> CreateThumbnailBrush(const FString& FilePath) const;
 
 private:
 	TSharedPtr<SMultiLineEditableTextBox> InputTextBox;
@@ -92,6 +97,12 @@ private:
 
 	/** Image file name display */
 	TSharedPtr<STextBlock> ImageFileNameText;
+
+	/** Thumbnail image widget */
+	TSharedPtr<SImage> ThumbnailImage;
+
+	/** Dynamic brush for the thumbnail (must outlive the SImage) */
+	TSharedPtr<FSlateDynamicImageBrush> ThumbnailBrush;
 
 	TAttribute<bool> bIsWaiting;
 	FOnInputAction OnSend;

@@ -65,9 +65,28 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 	const int32 BitCount = Header->biBitCount;
 	const bool bTopDown = (Header->biHeight < 0);
 
+	// Validate dimensions and bit depth
+	constexpr int32 MaxReasonableDimension = 16384;
 	if (Width <= 0 || Height <= 0 || (BitCount != 24 && BitCount != 32))
 	{
 		UE_LOG(LogUnrealClaude, Warning, TEXT("Unsupported clipboard image format: %dx%d, %d bpp"), Width, Height, BitCount);
+		::GlobalUnlock(hData);
+		::CloseClipboard();
+		return false;
+	}
+
+	if (Width > MaxReasonableDimension || Height > MaxReasonableDimension)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Clipboard image dimensions too large: %dx%d (max %d)"), Width, Height, MaxReasonableDimension);
+		::GlobalUnlock(hData);
+		::CloseClipboard();
+		return false;
+	}
+
+	// Validate compression type
+	if (Header->biCompression != BI_RGB && !(Header->biCompression == BI_BITFIELDS && BitCount == 32))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Unsupported clipboard DIB compression type: %d"), Header->biCompression);
 		::GlobalUnlock(hData);
 		::CloseClipboard();
 		return false;
