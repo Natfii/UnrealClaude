@@ -333,8 +333,8 @@ bool FClipboardImage_StreamJson_HandleEmptyOutput::RunTest(const FString& Parame
 
 	FString Parsed = Runner.ParseStreamJsonOutput(TEXT(""));
 
-	// Empty input should return empty (the raw output)
-	TestTrue("Should handle empty output gracefully", Parsed.IsEmpty());
+	// Empty input should return user-friendly error (not crash or return raw JSON)
+	TestTrue("Should return error message for empty output", Parsed.Contains(TEXT("Error")));
 
 	return true;
 }
@@ -503,6 +503,174 @@ bool FClipboardImage_StreamJson_BuildPayloadRejectsInvalidPath::RunTest(const FS
 			}
 		}
 	}
+
+	return true;
+}
+
+// ============================================================================
+// Stream-JSON Edge Case Tests
+// ============================================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_StreamJson_BuildPayloadWithoutImage,
+	"UnrealClaude.ClipboardImage.StreamJson.BuildPayloadWithoutImage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_StreamJson_BuildPayloadWithoutImage::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+
+	// Empty image path = text-only payload
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("Hello text only"), TEXT(""));
+
+	TestFalse("Payload should not be empty", Payload.IsEmpty());
+
+	FString JsonLine = Payload.TrimEnd();
+	TSharedPtr<FJsonObject> Envelope;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	bool bParsed = FJsonSerializer::Deserialize(Reader, Envelope);
+	TestTrue("Should be valid JSON", bParsed && Envelope.IsValid());
+
+	if (bParsed && Envelope.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* MessageObj;
+		if (Envelope->TryGetObjectField(TEXT("message"), MessageObj))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+			if ((*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+			{
+				TestEqual("Should have only 1 content block (text)", ContentArray->Num(), 1);
+
+				if (ContentArray->Num() >= 1)
+				{
+					const TSharedPtr<FJsonObject>* TextBlock;
+					(*ContentArray)[0]->TryGetObject(TextBlock);
+					if (TextBlock)
+					{
+						FString Text;
+						(*TextBlock)->TryGetStringField(TEXT("text"), Text);
+						TestEqual("Text should match input", Text, TEXT("Hello text only"));
+					}
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_StreamJson_BuildPayloadRejectsTraversal,
+	"UnrealClaude.ClipboardImage.StreamJson.BuildPayloadRejectsTraversal",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_StreamJson_BuildPayloadRejectsTraversal::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+
+	// Path with traversal should be rejected even if it starts with the right directory
+	FString ScreenshotDir = FClipboardImageUtils::GetScreenshotDirectory();
+	FString TraversalPath = FPaths::Combine(ScreenshotDir, TEXT(".."), TEXT(".."), TEXT("secrets.png"));
+
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("traversal test"), TraversalPath);
+
+	TestFalse("Payload should not be empty", Payload.IsEmpty());
+
+	FString JsonLine = Payload.TrimEnd();
+	TSharedPtr<FJsonObject> Envelope;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	bool bParsed = FJsonSerializer::Deserialize(Reader, Envelope);
+	TestTrue("Should be valid JSON", bParsed && Envelope.IsValid());
+
+	if (bParsed && Envelope.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* MessageObj;
+		if (Envelope->TryGetObjectField(TEXT("message"), MessageObj))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+			if ((*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+			{
+				TestEqual("Should have only 1 content block (text, no image)", ContentArray->Num(), 1);
+			}
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_StreamJson_BuildPayloadRejectsOversizedImage,
+	"UnrealClaude.ClipboardImage.StreamJson.BuildPayloadRejectsOversizedImage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_StreamJson_BuildPayloadRejectsOversizedImage::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+
+	// Create a file larger than 10MB in the screenshots directory
+	FString TestDir = FClipboardImageUtils::GetScreenshotDirectory();
+	IFileManager::Get().MakeDirectory(*TestDir, true);
+	FString OversizedPath = FPaths::Combine(TestDir, TEXT("clipboard_test_oversized.png"));
+
+	// Write ~11MB of data
+	TArray<uint8> BigData;
+	BigData.SetNum(11 * 1024 * 1024);
+	FMemory::Memset(BigData.GetData(), 0xFF, BigData.Num());
+	FFileHelper::SaveArrayToFile(BigData, *OversizedPath);
+
+	FString Payload = Runner.BuildStreamJsonPayload(TEXT("big image test"), OversizedPath);
+
+	TestFalse("Payload should not be empty", Payload.IsEmpty());
+
+	FString JsonLine = Payload.TrimEnd();
+	TSharedPtr<FJsonObject> Envelope;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonLine);
+	bool bParsed = FJsonSerializer::Deserialize(Reader, Envelope);
+	TestTrue("Should be valid JSON", bParsed && Envelope.IsValid());
+
+	if (bParsed && Envelope.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* MessageObj;
+		if (Envelope->TryGetObjectField(TEXT("message"), MessageObj))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* ContentArray;
+			if ((*MessageObj)->TryGetArrayField(TEXT("content"), ContentArray))
+			{
+				TestEqual("Should have only 1 content block (text, image rejected)", ContentArray->Num(), 1);
+			}
+		}
+	}
+
+	// Cleanup
+	IFileManager::Get().Delete(*OversizedPath);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FClipboardImage_StreamJson_ParseFailureReturnsErrorMessage,
+	"UnrealClaude.ClipboardImage.StreamJson.ParseFailureReturnsErrorMessage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FClipboardImage_StreamJson_ParseFailureReturnsErrorMessage::RunTest(const FString& Parameters)
+{
+	FClaudeCodeRunner Runner;
+
+	// Output with no result or assistant messages
+	FString SimulatedOutput =
+		TEXT("{\"type\":\"system\",\"subtype\":\"init\"}\n")
+		TEXT("{\"type\":\"tool_use\",\"name\":\"something\"}\n");
+
+	FString Parsed = Runner.ParseStreamJsonOutput(SimulatedOutput);
+
+	TestTrue("Should return error message on parse failure",
+		Parsed.Contains(TEXT("Error")));
+	TestTrue("Should mention Output Log",
+		Parsed.Contains(TEXT("Output Log")));
 
 	return true;
 }

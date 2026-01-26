@@ -483,36 +483,56 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 
 FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, const FString& ImagePath)
 {
-	// Validate the image path is within the expected screenshots directory
-	FString ExpectedDir = FPaths::ConvertRelativePathToFull(
-		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("screenshots")));
-	FString FullImagePath = FPaths::ConvertRelativePathToFull(ImagePath);
+	// Maximum image file size (bytes) before base64 encoding
+	// Claude API accepts up to 5MB images; base64 adds ~33% overhead
+	constexpr int64 MaxImageFileSize = 10 * 1024 * 1024; // 10 MB
 
 	bool bImageValid = false;
 	FString Base64ImageData;
 
-	if (!FullImagePath.StartsWith(ExpectedDir))
+	if (!ImagePath.IsEmpty())
 	{
-		UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
-	}
-	else if (!FPaths::FileExists(FullImagePath))
-	{
-		UE_LOG(LogUnrealClaude, Warning, TEXT("Attached image file no longer exists: %s"), *FullImagePath);
-	}
-	else
-	{
-		// Load and base64 encode the PNG
-		TArray<uint8> ImageData;
-		if (FFileHelper::LoadFileToArray(ImageData, *FullImagePath))
+		FString ExpectedDir = FPaths::ConvertRelativePathToFull(
+			FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("screenshots")));
+		FString FullImagePath = FPaths::ConvertRelativePathToFull(ImagePath);
+
+		if (FullImagePath.Contains(TEXT("..")))
 		{
-			Base64ImageData = FBase64::Encode(ImageData);
-			bImageValid = true;
-			UE_LOG(LogUnrealClaude, Log, TEXT("Base64 encoded image: %s (%d bytes -> %d chars)"),
-				*FullImagePath, ImageData.Num(), Base64ImageData.Len());
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path with traversal: %s"), *FullImagePath);
+		}
+		else if (!FullImagePath.StartsWith(ExpectedDir))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
+		}
+		else if (!FPaths::FileExists(FullImagePath))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Attached image file no longer exists: %s"), *FullImagePath);
 		}
 		else
 		{
-			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image file for base64 encoding: %s"), *FullImagePath);
+			// Check file size before loading
+			const int64 FileSize = IFileManager::Get().FileSize(*FullImagePath);
+			if (FileSize > MaxImageFileSize)
+			{
+				UE_LOG(LogUnrealClaude, Warning, TEXT("Image file too large for base64 encoding: %s (%lld bytes, max %lld)"),
+					*FullImagePath, FileSize, MaxImageFileSize);
+			}
+			else
+			{
+				// Load and base64 encode the PNG
+				TArray<uint8> ImageData;
+				if (FFileHelper::LoadFileToArray(ImageData, *FullImagePath))
+				{
+					Base64ImageData = FBase64::Encode(ImageData);
+					bImageValid = true;
+					UE_LOG(LogUnrealClaude, Log, TEXT("Base64 encoded image: %s (%d bytes -> %d chars)"),
+						*FullImagePath, ImageData.Num(), Base64ImageData.Len());
+				}
+				else
+				{
+					UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image file for base64 encoding: %s"), *FullImagePath);
+				}
+			}
 		}
 	}
 
@@ -667,9 +687,10 @@ FString FClaudeCodeRunner::ParseStreamJsonOutput(const FString& RawOutput)
 		return AccumulatedText;
 	}
 
-	// Last resort: return the raw output (shouldn't normally happen)
-	UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse stream-json output, returning raw (%d chars)"), RawOutput.Len());
-	return RawOutput;
+	// Last resort: return a user-friendly error instead of raw NDJSON
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse stream-json output (%d chars). Raw output logged below:"), RawOutput.Len());
+	UE_LOG(LogUnrealClaude, Warning, TEXT("%s"), *RawOutput.Left(2000));
+	return TEXT("Error: Failed to parse Claude's response. Check the Output Log for details.");
 }
 
 void FClaudeCodeRunner::Cancel()
