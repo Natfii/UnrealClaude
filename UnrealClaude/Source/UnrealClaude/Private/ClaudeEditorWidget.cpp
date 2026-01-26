@@ -256,7 +256,17 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 
 void SClaudeEditorWidget::SendMessage()
 {
-	if (CurrentInputText.IsEmpty() || bIsWaitingForResponse)
+	// Extract image paths before checking emptiness
+	TArray<FString> ImagePaths;
+	if (InputArea.IsValid())
+	{
+		ImagePaths = InputArea->GetAttachedImagePaths();
+	}
+
+	bool bHasText = !CurrentInputText.IsEmpty();
+	bool bHasImage = ImagePaths.Num() > 0;
+
+	if ((!bHasText && !bHasImage) || bIsWaitingForResponse)
 	{
 		return;
 	}
@@ -267,11 +277,42 @@ void SClaudeEditorWidget::SendMessage()
 		return;
 	}
 
-	// Add user message to chat
-	AddMessage(CurrentInputText, true);
+	// Build display message
+	FString DisplayMessage = bHasText ? CurrentInputText : FString();
+	if (bHasImage)
+	{
+		FString ImageLabel;
+		if (ImagePaths.Num() == 1)
+		{
+			ImageLabel = FString::Printf(TEXT("[Attached image: %s]"), *FPaths::GetCleanFilename(ImagePaths[0]));
+		}
+		else
+		{
+			TArray<FString> FileNames;
+			for (const FString& Path : ImagePaths)
+			{
+				FileNames.Add(FPaths::GetCleanFilename(Path));
+			}
+			ImageLabel = FString::Printf(TEXT("[Attached %d images: %s]"), ImagePaths.Num(), *FString::Join(FileNames, TEXT(" ")));
+		}
 
-	// Save and clear input
-	FString Prompt = CurrentInputText;
+		if (bHasText)
+		{
+			DisplayMessage += TEXT("\n") + ImageLabel;
+		}
+		else
+		{
+			DisplayMessage = ImageLabel;
+		}
+	}
+
+	// Add user message to chat
+	AddMessage(DisplayMessage, true);
+
+	// Build prompt - use default if image-only
+	FString Prompt = bHasText ? CurrentInputText : TEXT("Please analyze this image.");
+
+	// Clear input
 	CurrentInputText.Empty();
 	if (InputArea.IsValid())
 	{
@@ -284,29 +325,38 @@ void SClaudeEditorWidget::SendMessage()
 	// Start streaming response display
 	StartStreamingResponse();
 
-	// Send to Claude with progress callback
+	// Send to Claude using FClaudePromptOptions
 	FOnClaudeResponse OnComplete;
 	OnComplete.BindSP(this, &SClaudeEditorWidget::OnClaudeResponse);
 
-	FOnClaudeProgress OnProgress;
-	OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
+	FClaudePromptOptions Options;
+	Options.bIncludeEngineContext = bIncludeUE57Context;
+	Options.bIncludeProjectContext = bIncludeProjectContext;
+	Options.OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
+	Options.AttachedImagePaths = ImagePaths;
 
-	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, bIncludeUE57Context, OnProgress, bIncludeProjectContext);
+	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, Options);
 }
 
 void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSuccess)
 {
 	bIsWaitingForResponse = false;
 
-	// Finalize the streaming response
-	FinalizeStreamingResponse();
-
 	if (bSuccess)
 	{
-		// Use the streamed response if we have one, otherwise use the final response
+		// If we have a streaming bubble but no progress was received (e.g., image mode
+		// suppresses progress callbacks), populate it with the final response so
+		// FinalizeStreamingResponse updates the existing bubble instead of leaving "Thinking..."
+		if (StreamingResponse.IsEmpty() && StreamingTextBlock.IsValid())
+		{
+			StreamingResponse = Response;
+		}
+
+		FinalizeStreamingResponse();
+
 		LastResponse = StreamingResponse.IsEmpty() ? Response : StreamingResponse;
 
-		// If streaming didn't show anything, add the final response
+		// Only add a new bubble if we had no streaming bubble at all
 		if (StreamingResponse.IsEmpty())
 		{
 			AddMessage(Response, false);
@@ -314,6 +364,7 @@ void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSucces
 	}
 	else
 	{
+		FinalizeStreamingResponse();
 		AddMessage(FString::Printf(TEXT("Error: %s"), *Response), false);
 	}
 

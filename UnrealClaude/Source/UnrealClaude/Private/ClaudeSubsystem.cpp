@@ -84,6 +84,8 @@ void FClaudeCodeSubsystem::SendPrompt(
 	Config.bSkipPermissions = true;
 	Config.AllowedTools = { TEXT("Read"), TEXT("Write"), TEXT("Edit"), TEXT("Grep"), TEXT("Glob"), TEXT("Bash") };
 
+	Config.AttachedImagePaths = Options.AttachedImagePaths;
+
 	if (Options.bIncludeEngineContext)
 	{
 		Config.SystemPrompt = GetUE57SystemPrompt();

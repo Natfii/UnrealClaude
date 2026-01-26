@@ -33,6 +33,9 @@ struct UNREALCLAUDE_API FClaudeRequestConfig
 
 	/** Allow Claude to use tools (Read, Write, Bash, etc.) */
 	TArray<FString> AllowedTools;
+
+	/** Optional paths to attached clipboard images (PNG) for Claude to read */
+	TArray<FString> AttachedImagePaths;
 };
 
 /**
