@@ -8,8 +8,7 @@
 
 UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) directly into the Unreal Engine 5.7 Editor. Instead of using the API directly, this plugin shells out to the `claude` command-line tool, leveraging your existing Claude Code authentication and capabilities.
 
-<img width="1133" height="999" alt="{7CF904DB-1D4C-4F16-AD00-2D9E7E9F64C6}" src="https://github.com/user-attachments/assets/833c4e9d-2eb6-4f52-b004-54cf6d95c837" />
-
+<img width="1131" height="1055" alt="{051D8F19-2677-4682-9DDF-A461041C1039}" src="https://github.com/user-attachments/assets/3803aed6-cb2d-4d2a-bac3-dbb1ec3fbf1d" />
 
 **Key Features:**
 - **Native Editor Integration** - Chat panel docked in your editor with live streaming responses, tool call grouping, and code block rendering
