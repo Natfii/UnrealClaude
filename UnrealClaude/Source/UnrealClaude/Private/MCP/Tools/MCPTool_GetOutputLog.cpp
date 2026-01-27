@@ -19,50 +19,86 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 	FString Filter;
 	Params->TryGetStringField(TEXT("filter"), Filter);
 
-	// Get the current log file path
-	FString LogFilePath = FPaths::ProjectLogDir() / FApp::GetProjectName() + TEXT(".log");
+	// Resolve all candidate paths to absolute paths for reliable Windows file access
+	FString ProjectLogDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectLogDir());
+	FString EngineLogDir = FPaths::ConvertRelativePathToFull(FPaths::EngineDir() / TEXT("Saved/Logs"));
 
-	// If project log doesn't exist, try the default log location
-	if (!FPaths::FileExists(LogFilePath))
+	// Search for the log file across multiple candidate locations
+	FString LogFilePath;
+	bool bFound = false;
+	TArray<FString> SearchedPaths;
+
+	// 1. Project-named log in project log directory
 	{
-		LogFilePath = FPaths::ProjectLogDir() / TEXT("UnrealEditor.log");
+		FString Candidate = ProjectLogDir / FApp::GetProjectName() + TEXT(".log");
+		SearchedPaths.Add(Candidate);
+		if (FPaths::FileExists(Candidate))
+		{
+			LogFilePath = Candidate;
+			bFound = true;
+		}
 	}
 
-	if (!FPaths::FileExists(LogFilePath))
+	// 2. UnrealEditor.log in project log directory
+	if (!bFound)
 	{
-		// Try to find any .log file in the project log directory
-		TArray<FString> LogFiles;
-		IFileManager::Get().FindFiles(LogFiles, *FPaths::ProjectLogDir(), TEXT("*.log"));
+		FString Candidate = ProjectLogDir / TEXT("UnrealEditor.log");
+		SearchedPaths.Add(Candidate);
+		if (FPaths::FileExists(Candidate))
+		{
+			LogFilePath = Candidate;
+			bFound = true;
+		}
+	}
 
+	// 3. Any .log file in project log directory
+	if (!bFound)
+	{
+		TArray<FString> LogFiles;
+		IFileManager::Get().FindFiles(LogFiles, *ProjectLogDir, TEXT("*.log"));
 		if (LogFiles.Num() > 0)
 		{
-			LogFilePath = FPaths::ProjectLogDir() / LogFiles[0];
-		}
-		else
-		{
-			// Fallback to engine saved logs directory
-			FString EngineSavedLogs = FPaths::EngineDir() / TEXT("Saved/Logs");
-			LogFilePath = EngineSavedLogs / TEXT("UnrealEditor.log");
-			if (!FPaths::FileExists(LogFilePath))
-			{
-				IFileManager::Get().FindFiles(LogFiles, *EngineSavedLogs, TEXT("*.log"));
-				if (LogFiles.Num() > 0)
-				{
-					LogFilePath = EngineSavedLogs / LogFiles[0];
-				}
-				else
-				{
-					return FMCPToolResult::Error(
-						FString::Printf(TEXT("No log file found. Searched: %s and %s"),
-							*FPaths::ProjectLogDir(), *EngineSavedLogs));
-				}
-			}
+			LogFilePath = ProjectLogDir / LogFiles[0];
+			bFound = true;
 		}
 	}
 
-	// Read the log file
+	// 4. UnrealEditor.log in engine saved logs
+	if (!bFound)
+	{
+		FString Candidate = EngineLogDir / TEXT("UnrealEditor.log");
+		SearchedPaths.Add(Candidate);
+		if (FPaths::FileExists(Candidate))
+		{
+			LogFilePath = Candidate;
+			bFound = true;
+		}
+	}
+
+	// 5. Any .log file in engine saved logs
+	if (!bFound)
+	{
+		TArray<FString> LogFiles;
+		IFileManager::Get().FindFiles(LogFiles, *EngineLogDir, TEXT("*.log"));
+		if (LogFiles.Num() > 0)
+		{
+			LogFilePath = EngineLogDir / LogFiles[0];
+			bFound = true;
+		}
+	}
+
+	if (!bFound)
+	{
+		FString AllPaths = FString::Join(SearchedPaths, TEXT(", "));
+		return FMCPToolResult::Error(
+			FString::Printf(TEXT("No log file found. Searched paths: %s. Also scanned directories: %s, %s"),
+				*AllPaths, *ProjectLogDir, *EngineLogDir));
+	}
+
+	// Read the log file with FILEREAD_AllowWrite so we can read while the editor writes to it.
+	// Without this flag, Windows file sharing semantics prevent reading the active log.
 	FString LogContent;
-	if (!FFileHelper::LoadFileToString(LogContent, *LogFilePath))
+	if (!FFileHelper::LoadFileToString(LogContent, *LogFilePath, FFileHelper::EHashOptions::None, FILEREAD_AllowWrite))
 	{
 		return FMCPToolResult::Error(FString::Printf(TEXT("Failed to read log file: %s"), *LogFilePath));
 	}
