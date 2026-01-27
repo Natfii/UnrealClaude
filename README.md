@@ -48,7 +48,8 @@ claude -p "Hello, can you see me?"
 
 ## Installation
 
-<img width="1223" height="145" alt="{BAD65806-D06F-4F41-B7CC-40BF7B53212B}" src="https://github.com/user-attachments/assets/f39cd70a-5d1c-449b-baff-21e906e6dd3d" />
+<img width="1210" height="98" alt="{0C6B3595-D641-4F4A-AAEC-1797574A1DD1}" src="https://github.com/user-attachments/assets/71b3eb22-0d5e-4181-9703-f68098f04c8b" />
+(Check the Editor catagory in the plugin browser. You might need to scroll down for it if search doesn't pick it up)
 
 ### Option A: Copy to Project Plugins (Recommended)
 
