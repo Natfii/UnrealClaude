@@ -1,17 +1,38 @@
 {
-  "name": "unrealclaude-mcp-bridge",
-  "version": "1.1.0",
-  "description": "MCP bridge for UnrealClaude editor integration",
+  "name": "ue5-mcp-server",
+  "version": "1.2.0",
+  "description": "MCP server for Unreal Engine 5 editor integration - works with Claude Code, Claude Desktop, and any MCP-compatible AI client",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "unreal-engine",
+    "ue5",
+    "game-development",
+    "editor-integration",
+    "claude",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Natfii/unrealclaude-mcp-bridge.git"
+  },
+  "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.0",
-    "zod": "^3.24.0"
+    "@modelcontextprotocol/sdk": "^1.11.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "vitest": "^4.0.18"
   }
 }
