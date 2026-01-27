@@ -13,6 +13,7 @@
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSpacer.h"
@@ -23,6 +24,7 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
+#include "Styling/CoreStyle.h"
 #include "HAL/PlatformApplicationMisc.h"
 
 #define LOCTEXT_NAMESPACE "UnrealClaude"
@@ -35,45 +37,73 @@ void SChatMessage::Construct(const FArguments& InArgs)
 {
 	bool bIsUser = InArgs._IsUser;
 	FString Message = InArgs._Message;
-	
-	// Different colors for user vs assistant
-	FLinearColor BackgroundColor = bIsUser 
-		? FLinearColor(0.15f, 0.15f, 0.2f, 1.0f)  // Dark blue for user
-		: FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);   // Dark gray for assistant
-	
+
+	// Distinct colors for user vs assistant
+	FLinearColor BackgroundColor = bIsUser
+		? FLinearColor(0.13f, 0.13f, 0.18f, 1.0f)  // Dark blue-gray for user
+		: FLinearColor(0.08f, 0.08f, 0.08f, 1.0f);  // Near-black for assistant
+
+	// Accent bar color (left edge indicator like CLI prompt markers)
+	FLinearColor AccentColor = bIsUser
+		? FLinearColor(0.3f, 0.5f, 0.9f, 1.0f)   // Blue accent for user
+		: FLinearColor(0.6f, 0.4f, 0.2f, 1.0f);   // Warm orange accent for Claude
+
 	FLinearColor TextColor = FLinearColor::White;
-	
-	FString RoleLabel = bIsUser ? TEXT("You") : TEXT("Claude");
-	
+	FLinearColor RoleLabelColor = bIsUser
+		? FLinearColor(0.4f, 0.6f, 1.0f)   // Light blue
+		: FLinearColor(0.9f, 0.6f, 0.3f);  // Warm orange
+
+	FString RoleLabel = bIsUser ? TEXT("> You") : TEXT("Claude");
+
 	ChildSlot
 	[
-		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
-		.BorderBackgroundColor(BackgroundColor)
-		.Padding(FMargin(10.0f, 8.0f))
+		SNew(SHorizontalBox)
+
+		// Left accent bar
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
 		[
-			SNew(SVerticalBox)
-			
-			// Role label
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0, 0, 0, 4)
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(AccentColor)
+			.Padding(FMargin(1.5f, 0.0f))
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(RoleLabel))
-				.TextStyle(FAppStyle::Get(), "SmallText")
-				.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+				SNullWidget::NullWidget
 			]
-			
-			// Message content
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+		]
+
+		// Message body
+		+ SHorizontalBox::Slot()
+		.FillWidth(1.0f)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+			.BorderBackgroundColor(BackgroundColor)
+			.Padding(FMargin(12.0f, 8.0f, 10.0f, 8.0f))
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Message))
-				.TextStyle(FAppStyle::Get(), "NormalText")
-				.ColorAndOpacity(FSlateColor(TextColor))
-				.AutoWrapText(true)
+				SNew(SVerticalBox)
+
+				// Role label
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0, 0, 0, 6)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(RoleLabel))
+					.TextStyle(FAppStyle::Get(), "SmallText")
+					.ColorAndOpacity(FSlateColor(RoleLabelColor))
+				]
+
+				// Message content
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Message))
+					.TextStyle(FAppStyle::Get(), "NormalText")
+					.ColorAndOpacity(FSlateColor(TextColor))
+					.AutoWrapText(true)
+				]
 			]
 		]
 	];
@@ -237,15 +267,27 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 {
 	if (ChatMessagesBox.IsValid())
 	{
+		// Add a thin separator line between messages for visual clarity
+		if (ChatMessagesBox->NumSlots() > 0)
+		{
+			ChatMessagesBox->AddSlot()
+			.AutoHeight()
+			.Padding(FMargin(8.0f, 2.0f))
+			[
+				SNew(SSeparator)
+				.ColorAndOpacity(FLinearColor(0.15f, 0.15f, 0.15f, 0.5f))
+			];
+		}
+
 		ChatMessagesBox->AddSlot()
 		.AutoHeight()
-		.Padding(4.0f)
+		.Padding(FMargin(4.0f, 6.0f, 4.0f, 6.0f))
 		[
 			SNew(SChatMessage)
 			.Message(Message)
 			.IsUser(bIsUser)
 		];
-		
+
 		// Scroll to bottom
 		if (ChatScrollBox.IsValid())
 		{
@@ -333,6 +375,7 @@ void SClaudeEditorWidget::SendMessage()
 	Options.bIncludeEngineContext = bIncludeUE57Context;
 	Options.bIncludeProjectContext = bIncludeProjectContext;
 	Options.OnProgress.BindSP(this, &SClaudeEditorWidget::OnClaudeProgress);
+	Options.OnStreamEvent.BindSP(this, &SClaudeEditorWidget::OnClaudeStreamEvent);
 	Options.AttachedImagePaths = ImagePaths;
 
 	FClaudeCodeSubsystem::Get().SendPrompt(Prompt, OnComplete, Options);
@@ -350,6 +393,11 @@ void SClaudeEditorWidget::OnClaudeResponse(const FString& Response, bool bSucces
 		if (StreamingResponse.IsEmpty() && StreamingTextBlock.IsValid())
 		{
 			StreamingResponse = Response;
+			CurrentSegmentText = Response;
+			if (StreamingTextBlock.IsValid())
+			{
+				StreamingTextBlock->SetText(FText::FromString(Response));
+			}
 		}
 
 		FinalizeStreamingResponse();
@@ -381,7 +429,7 @@ void SClaudeEditorWidget::ClearChat()
 
 	FClaudeCodeSubsystem::Get().ClearHistory();
 	LastResponse.Empty();
-	StreamingResponse.Empty();
+	ResetStreamingState();
 
 	// Add welcome message again
 	AddMessage(TEXT("Chat cleared. Ready for new questions!"), false);
@@ -454,7 +502,7 @@ void SClaudeEditorWidget::NewSession()
 
 	// Clear local state
 	LastResponse.Empty();
-	StreamingResponse.Empty();
+	ResetStreamingState();
 
 	// Add welcome message
 	AddMessage(TEXT("New session started. Previous context has been cleared."), false);
@@ -470,14 +518,28 @@ FText SClaudeEditorWidget::GetStatusText() const
 {
 	if (bIsWaitingForResponse)
 	{
-		return LOCTEXT("StatusThinking", "● Claude is thinking...");
+		double ElapsedSec = FPlatformTime::Seconds() - StreamingStartTime;
+		FString StatusStr = FString::Printf(TEXT("● Claude is thinking... %.1fs"), ElapsedSec);
+
+		if (StreamingToolCallCount > 0)
+		{
+			StatusStr += FString::Printf(TEXT(" | %d tool%s"),
+				StreamingToolCallCount, StreamingToolCallCount != 1 ? TEXT("s") : TEXT(""));
+		}
+
+		return FText::FromString(StatusStr);
 	}
-	
+
 	if (!IsClaudeAvailable())
 	{
 		return LOCTEXT("StatusUnavailable", "● Claude CLI not found");
 	}
-	
+
+	if (!LastResultStats.IsEmpty())
+	{
+		return FText::FromString(FString::Printf(TEXT("● %s"), *LastResultStats));
+	}
+
 	return LOCTEXT("StatusReady", "● Ready");
 }
 
@@ -487,53 +549,128 @@ FSlateColor SClaudeEditorWidget::GetStatusColor() const
 	{
 		return FSlateColor(FLinearColor(1.0f, 0.8f, 0.0f)); // Yellow
 	}
-	
+
 	if (!IsClaudeAvailable())
 	{
 		return FSlateColor(FLinearColor(1.0f, 0.3f, 0.3f)); // Red
 	}
-	
+
+	if (!LastResultStats.IsEmpty())
+	{
+		return FSlateColor(FLinearColor(0.5f, 0.5f, 0.55f)); // Muted gray for stats
+	}
+
 	return FSlateColor(FLinearColor(0.3f, 1.0f, 0.3f)); // Green
+}
+
+void SClaudeEditorWidget::ResetStreamingState()
+{
+	StreamingResponse.Empty();
+	CurrentSegmentText.Empty();
+	StreamingTextBlock.Reset();
+	StreamingContentBox.Reset();
+	ToolCallStatusLabels.Empty();
+	ToolCallResultTexts.Empty();
+	ToolCallExpandables.Empty();
+	ToolCallNames.Empty();
+	AllTextSegments.Empty();
+	TextSegmentBlocks.Empty();
+	TextSegmentContainers.Empty();
+	ToolGroupExpandArea.Reset();
+	ToolGroupInnerBox.Reset();
+	ToolGroupSummaryText.Reset();
+	ToolGroupCount = 0;
+	ToolGroupDoneCount = 0;
+	ToolGroupCallIds.Empty();
+	StreamingToolCallCount = 0;
+	LastResultStats.Empty();
 }
 
 void SClaudeEditorWidget::StartStreamingResponse()
 {
-	StreamingResponse.Empty();
+	ResetStreamingState();
+	StreamingStartTime = FPlatformTime::Seconds();
 
 	if (ChatMessagesBox.IsValid())
 	{
-		// Create a streaming message container with live-updating text
+		// Add separator before streaming response
+		if (ChatMessagesBox->NumSlots() > 0)
+		{
+			ChatMessagesBox->AddSlot()
+			.AutoHeight()
+			.Padding(FMargin(8.0f, 2.0f))
+			[
+				SNew(SSeparator)
+				.ColorAndOpacity(FLinearColor(0.15f, 0.15f, 0.15f, 0.5f))
+			];
+		}
+
+		// Create the first text segment container
+		TSharedPtr<SVerticalBox> FirstSegmentContainer;
+
+		// Build the inner content box with role label + first text segment
+		SAssignNew(StreamingContentBox, SVerticalBox)
+
+		// Role label
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0, 0, 0, 6)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(TEXT("Claude")))
+			.TextStyle(FAppStyle::Get(), "SmallText")
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.6f, 0.3f)))
+		]
+
+		// First text segment (wrapped in container for code block replacement)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SAssignNew(FirstSegmentContainer, SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SAssignNew(StreamingTextBlock, STextBlock)
+				.Text(FText::FromString(TEXT("Thinking...")))
+				.TextStyle(FAppStyle::Get(), "NormalText")
+				.ColorAndOpacity(FSlateColor(FLinearColor::White))
+				.AutoWrapText(true)
+			]
+		];
+
+		TextSegmentBlocks.Add(StreamingTextBlock);
+		TextSegmentContainers.Add(FirstSegmentContainer);
+
+		// Wrap content box in accent bar + border (matching SChatMessage style)
 		ChatMessagesBox->AddSlot()
 		.AutoHeight()
-		.Padding(4.0f)
+		.Padding(FMargin(4.0f, 6.0f, 4.0f, 6.0f))
 		[
-			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
-			.BorderBackgroundColor(FLinearColor(0.1f, 0.1f, 0.1f, 1.0f))
-			.Padding(FMargin(10.0f, 8.0f))
+			SNew(SHorizontalBox)
+
+			// Left accent bar (orange for Claude)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
 			[
-				SNew(SVerticalBox)
-
-				// Role label
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0, 0, 0, 4)
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.6f, 0.4f, 0.2f, 1.0f))
+				.Padding(FMargin(1.5f, 0.0f))
 				[
-					SNew(STextBlock)
-					.Text(FText::FromString(TEXT("Claude")))
-					.TextStyle(FAppStyle::Get(), "SmallText")
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+					SNullWidget::NullWidget
 				]
+			]
 
-				// Streaming message content
-				+ SVerticalBox::Slot()
-				.AutoHeight()
+			// Message body containing the dynamic content box
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.08f, 0.08f, 0.08f, 1.0f))
+				.Padding(FMargin(12.0f, 8.0f, 10.0f, 8.0f))
 				[
-					SAssignNew(StreamingTextBlock, STextBlock)
-					.Text(FText::FromString(TEXT("Thinking...")))
-					.TextStyle(FAppStyle::Get(), "NormalText")
-					.ColorAndOpacity(FSlateColor(FLinearColor::White))
-					.AutoWrapText(true)
+					StreamingContentBox.ToSharedRef()
 				]
 			]
 		];
@@ -548,13 +685,14 @@ void SClaudeEditorWidget::StartStreamingResponse()
 
 void SClaudeEditorWidget::OnClaudeProgress(const FString& PartialOutput)
 {
-	// Append to streaming response
+	// Append to total and current segment
 	StreamingResponse += PartialOutput;
+	CurrentSegmentText += PartialOutput;
 
-	// Update the streaming text block
+	// Update the current text segment block
 	if (StreamingTextBlock.IsValid())
 	{
-		StreamingTextBlock->SetText(FText::FromString(StreamingResponse));
+		StreamingTextBlock->SetText(FText::FromString(CurrentSegmentText));
 	}
 
 	// Auto-scroll to bottom as content streams in
@@ -564,18 +702,561 @@ void SClaudeEditorWidget::OnClaudeProgress(const FString& PartialOutput)
 	}
 }
 
+void SClaudeEditorWidget::OnClaudeStreamEvent(const FClaudeStreamEvent& Event)
+{
+	switch (Event.Type)
+	{
+	case EClaudeStreamEventType::SessionInit:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] SessionInit: session_id=%s"), *Event.SessionId);
+		break;
+
+	case EClaudeStreamEventType::TextContent:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] TextContent: %d chars"), Event.Text.Len());
+		break;
+
+	case EClaudeStreamEventType::ToolUse:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] ToolUse: %s (id=%s)"), *Event.ToolName, *Event.ToolCallId);
+		HandleToolUseEvent(Event);
+		break;
+
+	case EClaudeStreamEventType::ToolResult:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] ToolResult: tool_id=%s, %d chars"),
+			*Event.ToolCallId, Event.ToolResultContent.Len());
+		HandleToolResultEvent(Event);
+		break;
+
+	case EClaudeStreamEventType::Result:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] Result: error=%d, duration=%dms, turns=%d, cost=$%.4f"),
+			Event.bIsError, Event.DurationMs, Event.NumTurns, Event.TotalCostUsd);
+		HandleResultEvent(Event);
+		break;
+
+	default:
+		UE_LOG(LogUnrealClaude, Log, TEXT("[StreamEvent] Unknown type: %d"), static_cast<int32>(Event.Type));
+		break;
+	}
+}
+
 void SClaudeEditorWidget::FinalizeStreamingResponse()
 {
-	// The streaming text block remains as the final response
-	// Just update it with the complete text if we have streaming content
-	if (StreamingTextBlock.IsValid() && !StreamingResponse.IsEmpty())
+	// Save the final text segment
+	AllTextSegments.Add(CurrentSegmentText);
+
+	// Rebuild StreamingResponse from all segments for copy support
+	FString Rebuilt;
+	for (const FString& Segment : AllTextSegments)
 	{
-		StreamingTextBlock->SetText(FText::FromString(StreamingResponse));
-		LastResponse = StreamingResponse;
+		Rebuilt += Segment;
+	}
+	if (!Rebuilt.IsEmpty())
+	{
+		StreamingResponse = Rebuilt;
 	}
 
-	// Clear the reference (we don't need to update it anymore)
+	// For simple single-segment responses (no tool events), ensure text block is up to date
+	if (StreamingTextBlock.IsValid() && !StreamingResponse.IsEmpty() && TextSegmentBlocks.Num() <= 1)
+	{
+		StreamingTextBlock->SetText(FText::FromString(StreamingResponse));
+	}
+
+	LastResponse = StreamingResponse;
+
+	// Post-process text segments to render code blocks
+	ParseAndRenderCodeBlocks();
+
+	// Clear all streaming state (except StreamingResponse which is used by OnClaudeResponse)
 	StreamingTextBlock.Reset();
+	StreamingContentBox.Reset();
+	CurrentSegmentText.Empty();
+	ToolCallStatusLabels.Empty();
+	ToolCallResultTexts.Empty();
+	ToolCallExpandables.Empty();
+	ToolCallNames.Empty();
+	AllTextSegments.Empty();
+	TextSegmentBlocks.Empty();
+	TextSegmentContainers.Empty();
+	ToolGroupExpandArea.Reset();
+	ToolGroupInnerBox.Reset();
+	ToolGroupSummaryText.Reset();
+	ToolGroupCount = 0;
+	ToolGroupDoneCount = 0;
+	ToolGroupCallIds.Empty();
+}
+
+void SClaudeEditorWidget::HandleToolUseEvent(const FClaudeStreamEvent& Event)
+{
+	if (!StreamingContentBox.IsValid())
+	{
+		return;
+	}
+
+	// Track tool call count for status bar
+	StreamingToolCallCount++;
+
+	// Store tool name for later lookup
+	ToolCallNames.Add(Event.ToolCallId, Event.ToolName);
+
+	FString DisplayName = GetDisplayToolName(Event.ToolName);
+
+	// Check if this is a consecutive tool (no text since last tool = same group)
+	bool bIsConsecutive = CurrentSegmentText.IsEmpty() && ToolGroupInnerBox.IsValid();
+
+	if (!bIsConsecutive)
+	{
+		// Freeze the current text segment
+		AllTextSegments.Add(CurrentSegmentText);
+		CurrentSegmentText.Empty();
+
+		// Collapse empty text segment
+		if (AllTextSegments.Last().IsEmpty() && TextSegmentContainers.Num() > 0)
+		{
+			TextSegmentContainers.Last()->SetVisibility(EVisibility::Collapsed);
+		}
+
+		// Start a new tool group
+		ToolGroupCount = 0;
+		ToolGroupDoneCount = 0;
+		ToolGroupCallIds.Empty();
+
+		StreamingContentBox->AddSlot()
+		.AutoHeight()
+		.Padding(0, 3, 0, 3)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+			.BorderBackgroundColor(FLinearColor(0.10f, 0.10f, 0.13f, 1.0f))
+			.Padding(FMargin(4.0f, 2.0f))
+			[
+				SAssignNew(ToolGroupExpandArea, SExpandableArea)
+				.InitiallyCollapsed(false)
+				.HeaderPadding(FMargin(4.0f, 2.0f))
+				.HeaderContent()
+				[
+					SAssignNew(ToolGroupSummaryText, STextBlock)
+					.TextStyle(FAppStyle::Get(), "SmallText")
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.55f)))
+				]
+				.BodyContent()
+				[
+					SAssignNew(ToolGroupInnerBox, SVerticalBox)
+				]
+			]
+		];
+
+		// Create a new text segment for text after this tool group
+		TSharedPtr<SVerticalBox> NewSegmentContainer;
+
+		StreamingContentBox->AddSlot()
+		.AutoHeight()
+		[
+			SAssignNew(NewSegmentContainer, SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SAssignNew(StreamingTextBlock, STextBlock)
+				.Text(FText::GetEmpty())
+				.TextStyle(FAppStyle::Get(), "NormalText")
+				.ColorAndOpacity(FSlateColor(FLinearColor::White))
+				.AutoWrapText(true)
+			]
+		];
+
+		TextSegmentBlocks.Add(StreamingTextBlock);
+		TextSegmentContainers.Add(NewSegmentContainer);
+	}
+	else
+	{
+		// Consecutive tool - transition from single to grouped display
+		if (ToolGroupCount == 1)
+		{
+			// Collapse the group (was expanded for single tool)
+			if (ToolGroupExpandArea.IsValid())
+			{
+				ToolGroupExpandArea->SetExpanded(false);
+			}
+
+			// Show the first tool's inner status label (was hidden for single-tool display)
+			if (ToolGroupCallIds.Num() > 0)
+			{
+				TSharedPtr<STextBlock>* FirstStatusPtr = ToolCallStatusLabels.Find(ToolGroupCallIds[0]);
+				if (FirstStatusPtr && FirstStatusPtr->IsValid())
+				{
+					(*FirstStatusPtr)->SetVisibility(EVisibility::Visible);
+				}
+			}
+		}
+	}
+
+	// Add tool entry to the current group
+	ToolGroupCount++;
+	ToolGroupCallIds.Add(Event.ToolCallId);
+
+	TSharedPtr<STextBlock> StatusLabel;
+	TSharedPtr<STextBlock> ResultText;
+	TSharedPtr<SExpandableArea> ExpandArea;
+
+	ToolGroupInnerBox->AddSlot()
+	.AutoHeight()
+	.Padding(FMargin(4.0f, 1.0f, 0.0f, 1.0f))
+	[
+		SNew(SVerticalBox)
+
+		// Tool status line (hidden when single tool - header shows name instead)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SAssignNew(StatusLabel, STextBlock)
+			.Text(FText::FromString(FString::Printf(TEXT("> %s..."), *DisplayName)))
+			.TextStyle(FAppStyle::Get(), "SmallText")
+			.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.55f)))
+			.Visibility(ToolGroupCount == 1 ? EVisibility::Collapsed : EVisibility::Visible)
+		]
+
+		// Result expandable (hidden until result arrives)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SAssignNew(ExpandArea, SExpandableArea)
+			.InitiallyCollapsed(true)
+			.HeaderContent()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(TEXT("Result")))
+				.TextStyle(FAppStyle::Get(), "SmallText")
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.4f, 0.4f, 0.4f)))
+			]
+			.BodyContent()
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f))
+				.Padding(FMargin(8.0f, 6.0f))
+				[
+					SAssignNew(ResultText, STextBlock)
+					.Text(FText::GetEmpty())
+					.TextStyle(FAppStyle::Get(), "SmallText")
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+					.AutoWrapText(true)
+				]
+			]
+			.Visibility(EVisibility::Collapsed)
+		]
+	];
+
+	ToolCallStatusLabels.Add(Event.ToolCallId, StatusLabel);
+	ToolCallResultTexts.Add(Event.ToolCallId, ResultText);
+	ToolCallExpandables.Add(Event.ToolCallId, ExpandArea);
+
+	// Update group summary header
+	UpdateToolGroupSummary();
+
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
+}
+
+void SClaudeEditorWidget::HandleToolResultEvent(const FClaudeStreamEvent& Event)
+{
+	// Look up tool name
+	const FString* ToolNamePtr = ToolCallNames.Find(Event.ToolCallId);
+	FString ToolName = ToolNamePtr ? GetDisplayToolName(*ToolNamePtr) : TEXT("Tool");
+
+	// Update status label to show completion
+	TSharedPtr<STextBlock>* StatusLabelPtr = ToolCallStatusLabels.Find(Event.ToolCallId);
+	if (StatusLabelPtr && StatusLabelPtr->IsValid())
+	{
+		(*StatusLabelPtr)->SetText(FText::FromString(FString::Printf(TEXT("✓ %s completed"), *ToolName)));
+		(*StatusLabelPtr)->SetColorAndOpacity(FSlateColor(FLinearColor(0.3f, 0.75f, 0.3f)));
+	}
+
+	// Set result text (truncated for display)
+	TSharedPtr<STextBlock>* ResultTextPtr = ToolCallResultTexts.Find(Event.ToolCallId);
+	if (ResultTextPtr && ResultTextPtr->IsValid())
+	{
+		FString ResultContent = Event.ToolResultContent;
+		if (ResultContent.Len() > 2000)
+		{
+			ResultContent = ResultContent.Left(2000) + TEXT("\n... (truncated)");
+		}
+		(*ResultTextPtr)->SetText(FText::FromString(ResultContent));
+	}
+
+	// Make expandable area visible
+	TSharedPtr<SExpandableArea>* ExpandPtr = ToolCallExpandables.Find(Event.ToolCallId);
+	if (ExpandPtr && ExpandPtr->IsValid())
+	{
+		(*ExpandPtr)->SetVisibility(EVisibility::Visible);
+	}
+
+	// Update group summary
+	ToolGroupDoneCount++;
+	UpdateToolGroupSummary();
+
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
+}
+
+void SClaudeEditorWidget::HandleResultEvent(const FClaudeStreamEvent& Event)
+{
+	if (!StreamingContentBox.IsValid())
+	{
+		return;
+	}
+
+	// Collapse empty trailing text block if no text followed the last tool
+	if (CurrentSegmentText.IsEmpty() && TextSegmentContainers.Num() > 0)
+	{
+		TextSegmentContainers.Last()->SetVisibility(EVisibility::Collapsed);
+	}
+
+	// Format stats footer
+	float DurationSec = Event.DurationMs / 1000.0f;
+	FString StatsText = FString::Printf(TEXT("Done in %.1fs"), DurationSec);
+
+	if (Event.NumTurns > 0)
+	{
+		StatsText += FString::Printf(TEXT(" | %d turn%s"),
+			Event.NumTurns, Event.NumTurns != 1 ? TEXT("s") : TEXT(""));
+	}
+
+	if (Event.TotalCostUsd > 0.0f)
+	{
+		StatsText += FString::Printf(TEXT(" | $%.4f"), Event.TotalCostUsd);
+	}
+
+	// Store final stats for the status bar
+	LastResultStats = StatsText;
+
+	// Append stats footer to content box
+	StreamingContentBox->AddSlot()
+	.AutoHeight()
+	.Padding(0, 8, 0, 0)
+	[
+		SNew(STextBlock)
+		.Text(FText::FromString(StatsText))
+		.TextStyle(FAppStyle::Get(), "SmallText")
+		.ColorAndOpacity(FSlateColor(FLinearColor(0.4f, 0.4f, 0.45f)))
+	];
+
+	if (ChatScrollBox.IsValid())
+	{
+		ChatScrollBox->ScrollToEnd();
+	}
+}
+
+FString SClaudeEditorWidget::GetDisplayToolName(const FString& FullToolName)
+{
+	FString Name = FullToolName;
+	// Strip common MCP server prefix for cleaner display
+	Name.RemoveFromStart(TEXT("mcp__unrealclaude__unreal_"));
+	return Name;
+}
+
+void SClaudeEditorWidget::UpdateToolGroupSummary()
+{
+	if (!ToolGroupSummaryText.IsValid())
+	{
+		return;
+	}
+
+	if (ToolGroupCount == 1)
+	{
+		// Single tool - show its name in the header
+		FString DisplayName = TEXT("Tool");
+		if (ToolGroupCallIds.Num() > 0)
+		{
+			const FString* NamePtr = ToolCallNames.Find(ToolGroupCallIds[0]);
+			if (NamePtr)
+			{
+				DisplayName = GetDisplayToolName(*NamePtr);
+			}
+		}
+
+		if (ToolGroupDoneCount >= 1)
+		{
+			ToolGroupSummaryText->SetText(FText::FromString(
+				FString::Printf(TEXT("✓ %s completed"), *DisplayName)));
+			ToolGroupSummaryText->SetColorAndOpacity(
+				FSlateColor(FLinearColor(0.3f, 0.75f, 0.3f)));
+		}
+		else
+		{
+			ToolGroupSummaryText->SetText(FText::FromString(
+				FString::Printf(TEXT("> Using %s..."), *DisplayName)));
+		}
+	}
+	else
+	{
+		// Multiple tools - show count summary
+		if (ToolGroupDoneCount >= ToolGroupCount)
+		{
+			ToolGroupSummaryText->SetText(FText::FromString(
+				FString::Printf(TEXT("✓ %d tools completed"), ToolGroupCount)));
+			ToolGroupSummaryText->SetColorAndOpacity(
+				FSlateColor(FLinearColor(0.3f, 0.75f, 0.3f)));
+		}
+		else
+		{
+			ToolGroupSummaryText->SetText(FText::FromString(
+				FString::Printf(TEXT("> %d tools (%d/%d done)"),
+					ToolGroupCount, ToolGroupDoneCount, ToolGroupCount)));
+		}
+	}
+}
+
+void SClaudeEditorWidget::ParseCodeFences(const FString& Input, TArray<TPair<FString, bool>>& OutSections)
+{
+	OutSections.Empty();
+
+	int32 SearchFrom = 0;
+	bool bInCodeBlock = false;
+	int32 LastSplitPos = 0;
+
+	while (SearchFrom < Input.Len())
+	{
+		int32 FencePos = Input.Find(TEXT("```"), ESearchCase::CaseSensitive, ESearchDir::FromStart, SearchFrom);
+		if (FencePos == INDEX_NONE)
+		{
+			break;
+		}
+
+		if (!bInCodeBlock)
+		{
+			// Opening fence - text before it is plain text
+			FString PlainText = Input.Mid(LastSplitPos, FencePos - LastSplitPos);
+			if (!PlainText.IsEmpty())
+			{
+				OutSections.Add(TPair<FString, bool>(PlainText, false));
+			}
+
+			// Skip past the opening fence line (including language tag)
+			int32 LineEnd = Input.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, FencePos + 3);
+			if (LineEnd == INDEX_NONE)
+			{
+				LineEnd = Input.Len();
+			}
+
+			LastSplitPos = LineEnd + 1;
+			SearchFrom = LastSplitPos;
+			bInCodeBlock = true;
+		}
+		else
+		{
+			// Closing fence - text before it is code
+			FString CodeText = Input.Mid(LastSplitPos, FencePos - LastSplitPos);
+			CodeText.TrimEndInline();
+			if (!CodeText.IsEmpty())
+			{
+				OutSections.Add(TPair<FString, bool>(CodeText, true));
+			}
+
+			// Skip past the closing fence
+			int32 LineEnd = Input.Find(TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, FencePos + 3);
+			if (LineEnd == INDEX_NONE)
+			{
+				LastSplitPos = FencePos + 3;
+			}
+			else
+			{
+				LastSplitPos = LineEnd + 1;
+			}
+
+			SearchFrom = LastSplitPos;
+			bInCodeBlock = false;
+		}
+	}
+
+	// Remaining text after last fence
+	if (LastSplitPos < Input.Len())
+	{
+		FString Remaining = Input.Mid(LastSplitPos);
+		if (!Remaining.IsEmpty())
+		{
+			OutSections.Add(TPair<FString, bool>(Remaining, bInCodeBlock));
+		}
+	}
+}
+
+void SClaudeEditorWidget::ParseAndRenderCodeBlocks()
+{
+	for (int32 i = 0; i < TextSegmentBlocks.Num() && i < TextSegmentContainers.Num(); ++i)
+	{
+		TSharedPtr<STextBlock> Block = TextSegmentBlocks[i];
+		TSharedPtr<SVerticalBox> Container = TextSegmentContainers[i];
+
+		if (!Block.IsValid() || !Container.IsValid())
+		{
+			continue;
+		}
+
+		// Get the segment text
+		FString SegmentText;
+		if (i < AllTextSegments.Num())
+		{
+			SegmentText = AllTextSegments[i];
+		}
+		else
+		{
+			SegmentText = Block->GetText().ToString();
+		}
+
+		if (!SegmentText.Contains(TEXT("```")))
+		{
+			continue;
+		}
+
+		// Parse into code and plain text sections
+		TArray<TPair<FString, bool>> Sections;
+		ParseCodeFences(SegmentText, Sections);
+
+		if (Sections.Num() <= 1)
+		{
+			continue;
+		}
+
+		// Replace container contents with parsed sections
+		Container->ClearChildren();
+
+		for (const TPair<FString, bool>& Section : Sections)
+		{
+			if (Section.Value)
+			{
+				// Code block: dark background + monospace font
+				Container->AddSlot()
+				.AutoHeight()
+				.Padding(0, 4, 0, 4)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+					.BorderBackgroundColor(FLinearColor(0.04f, 0.04f, 0.06f, 1.0f))
+					.Padding(FMargin(10.0f, 8.0f))
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Section.Key))
+						.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.85f, 0.75f)))
+						.AutoWrapText(true)
+					]
+				];
+			}
+			else
+			{
+				// Plain text
+				Container->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Section.Key))
+					.TextStyle(FAppStyle::Get(), "NormalText")
+					.ColorAndOpacity(FSlateColor(FLinearColor::White))
+					.AutoWrapText(true)
+				];
+			}
+		}
+	}
 }
 
 void SClaudeEditorWidget::AppendToLastResponse(const FString& Text)

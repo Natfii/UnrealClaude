@@ -206,33 +206,53 @@ bool FMCPTool_SetProperty::SetNumericPropertyValue(FNumericProperty* NumProp, vo
 
 bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, void* ValuePtr, const TSharedPtr<FJsonValue>& Value)
 {
+	// Use both pointer comparison and name-based matching for robustness.
+	// TBaseStructure<T>::Get() can fail to match at runtime in some module configurations,
+	// so we fall back to the struct's reflected name (UE drops the 'F' prefix).
+	const FName StructName = StructProp->Struct->GetFName();
+
+	const bool bIsFColor = (StructProp->Struct == TBaseStructure<FColor>::Get())
+		|| (StructName == FName("Color"));
+	const bool bIsLinearColor = (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
+		|| (StructName == FName("LinearColor"));
+	const bool bIsVector = (StructProp->Struct == TBaseStructure<FVector>::Get())
+		|| (StructName == FName("Vector"));
+	const bool bIsRotator = (StructProp->Struct == TBaseStructure<FRotator>::Get())
+		|| (StructName == FName("Rotator"));
+
 	// Check for hex string format first (works for both FColor and FLinearColor)
-	FString HexString;
-	if (Value->TryGetString(HexString))
+	FString StringValue;
+	if (Value->TryGetString(StringValue))
 	{
-		// Remove # prefix if present
+		FString HexString = StringValue;
 		if (HexString.StartsWith(TEXT("#")))
 		{
 			HexString = HexString.RightChop(1);
 		}
 
-		// Validate hex string (6 or 8 characters for RGB or RGBA)
 		if (HexString.Len() == 6 || HexString.Len() == 8)
 		{
 			FColor ParsedColor = FColor::FromHex(HexString);
 
-			if (StructProp->Struct == TBaseStructure<FColor>::Get())
+			if (bIsFColor)
 			{
 				*reinterpret_cast<FColor*>(ValuePtr) = ParsedColor;
 				return true;
 			}
 
-			if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
+			if (bIsLinearColor)
 			{
-				// Convert FColor (0-255) to FLinearColor (0.0-1.0)
 				*reinterpret_cast<FLinearColor*>(ValuePtr) = FLinearColor(ParsedColor);
 				return true;
 			}
+		}
+
+		// Generic string fallback: try UE's built-in ImportText for any struct type.
+		// Handles formats like "(R=255,G=0,B=0,A=255)" or "(X=1.0,Y=2.0,Z=3.0)".
+		const TCHAR* ImportResult = StructProp->ImportText_Direct(*StringValue, ValuePtr, nullptr, 0);
+		if (ImportResult != nullptr)
+		{
+			return true;
 		}
 	}
 
@@ -243,7 +263,7 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		return false;
 	}
 
-	if (StructProp->Struct == TBaseStructure<FVector>::Get())
+	if (bIsVector)
 	{
 		FVector Vec;
 		(*ObjVal)->TryGetNumberField(TEXT("x"), Vec.X);
@@ -253,7 +273,7 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		return true;
 	}
 
-	if (StructProp->Struct == TBaseStructure<FRotator>::Get())
+	if (bIsRotator)
 	{
 		FRotator Rot;
 		(*ObjVal)->TryGetNumberField(TEXT("pitch"), Rot.Pitch);
@@ -263,28 +283,28 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		return true;
 	}
 
-	// FColor - uses uint8 values (0-255)
-	if (StructProp->Struct == TBaseStructure<FColor>::Get())
+	// FColor - uses uint8 values (0-255). Parse via double to handle JSON number types robustly.
+	if (bIsFColor)
 	{
 		FColor Color;
-		int32 R = 0, G = 0, B = 0, A = 255;
+		double R = 0, G = 0, B = 0, A = 255;
 		(*ObjVal)->TryGetNumberField(TEXT("r"), R);
 		(*ObjVal)->TryGetNumberField(TEXT("g"), G);
 		(*ObjVal)->TryGetNumberField(TEXT("b"), B);
 		if (!(*ObjVal)->TryGetNumberField(TEXT("a"), A))
 		{
-			A = 255; // Default to fully opaque
+			A = 255.0;
 		}
-		Color.R = static_cast<uint8>(FMath::Clamp(R, 0, 255));
-		Color.G = static_cast<uint8>(FMath::Clamp(G, 0, 255));
-		Color.B = static_cast<uint8>(FMath::Clamp(B, 0, 255));
-		Color.A = static_cast<uint8>(FMath::Clamp(A, 0, 255));
+		Color.R = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(R), 0, 255));
+		Color.G = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(G), 0, 255));
+		Color.B = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(B), 0, 255));
+		Color.A = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(A), 0, 255));
 		*reinterpret_cast<FColor*>(ValuePtr) = Color;
 		return true;
 	}
 
 	// FLinearColor - uses float values (0.0-1.0)
-	if (StructProp->Struct == TBaseStructure<FLinearColor>::Get())
+	if (bIsLinearColor)
 	{
 		FLinearColor Color;
 		(*ObjVal)->TryGetNumberField(TEXT("r"), Color.R);
@@ -292,10 +312,49 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		(*ObjVal)->TryGetNumberField(TEXT("b"), Color.B);
 		if (!(*ObjVal)->TryGetNumberField(TEXT("a"), Color.A))
 		{
-			Color.A = 1.0f; // Default to fully opaque
+			Color.A = 1.0f;
+		}
+		// Auto-normalize: if any color component > 1.5, assume 0-255 range
+		if (Color.R > 1.5f || Color.G > 1.5f || Color.B > 1.5f)
+		{
+			Color.R /= 255.0f;
+			Color.G /= 255.0f;
+			Color.B /= 255.0f;
+			if (Color.A > 1.5f) Color.A /= 255.0f;
 		}
 		*reinterpret_cast<FLinearColor*>(ValuePtr) = Color;
 		return true;
+	}
+
+	// Generic fallback: convert JSON object to UE text format and use ImportText.
+	// Builds "(Key=Value,Key=Value,...)" from the JSON fields.
+	{
+		FString TextRepresentation = TEXT("(");
+		bool bFirst = true;
+		for (const auto& Pair : (*ObjVal)->Values)
+		{
+			if (!bFirst) TextRepresentation += TEXT(",");
+			TextRepresentation += Pair.Key.ToUpper() + TEXT("=");
+
+			double NumVal;
+			FString StrVal;
+			if (Pair.Value->TryGetNumber(NumVal))
+			{
+				TextRepresentation += FString::SanitizeFloat(NumVal);
+			}
+			else if (Pair.Value->TryGetString(StrVal))
+			{
+				TextRepresentation += StrVal;
+			}
+			bFirst = false;
+		}
+		TextRepresentation += TEXT(")");
+
+		const TCHAR* ImportResult = StructProp->ImportText_Direct(*TextRepresentation, ValuePtr, nullptr, 0);
+		if (ImportResult != nullptr)
+		{
+			return true;
+		}
 	}
 
 	return false;
@@ -400,8 +459,12 @@ bool FMCPTool_SetProperty::SetPropertyFromJson(UObject* Object, const FString& P
 		{
 			return true;
 		}
+		OutError = FString::Printf(TEXT("Failed to set struct property '%s' (type: F%s). Supported formats: JSON object with fields, hex color string, or UE text format like \"(X=1,Y=2,Z=3)\"."),
+			*PropertyPath, *StructProp->Struct->GetName());
+		return false;
 	}
 
-	OutError = FString::Printf(TEXT("Unsupported property type for: %s"), *PropertyPath);
+	OutError = FString::Printf(TEXT("Unsupported property type '%s' for: %s"),
+		*Property->GetCPPType(), *PropertyPath);
 	return false;
 }

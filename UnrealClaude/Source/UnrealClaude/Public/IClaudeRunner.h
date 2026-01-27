@@ -9,6 +9,77 @@ DECLARE_DELEGATE_TwoParams(FOnClaudeResponse, const FString& /*Response*/, bool 
 DECLARE_DELEGATE_OneParam(FOnClaudeProgress, const FString& /*PartialOutput*/);
 
 /**
+ * Types of structured events from Claude stream-json NDJSON output.
+ * Maps to the message types documented in Claude Code SDK spec.
+ */
+enum class EClaudeStreamEventType : uint8
+{
+	/** Session initialization (system.init) */
+	SessionInit,
+	/** Text content from assistant */
+	TextContent,
+	/** Tool use block from assistant (tool invocation) */
+	ToolUse,
+	/** Tool result returned to Claude (user message with tool_result) */
+	ToolResult,
+	/** Final result with stats and cost */
+	Result,
+	/** Raw assistant message (full message, not parsed into sub-events) */
+	AssistantMessage,
+	/** Unknown or unparsed event type */
+	Unknown
+};
+
+/**
+ * Structured event parsed from Claude CLI stream-json NDJSON output.
+ * Each NDJSON line becomes one of these events.
+ */
+struct UNREALCLAUDE_API FClaudeStreamEvent
+{
+	/** Event type */
+	EClaudeStreamEventType Type = EClaudeStreamEventType::Unknown;
+
+	/** Text content (for TextContent events) */
+	FString Text;
+
+	/** Tool name (for ToolUse events) */
+	FString ToolName;
+
+	/** Tool input JSON string (for ToolUse events) */
+	FString ToolInput;
+
+	/** Tool call ID (for ToolUse/ToolResult events) */
+	FString ToolCallId;
+
+	/** Tool result content (for ToolResult events) */
+	FString ToolResultContent;
+
+	/** Session ID (for SessionInit/Result events) */
+	FString SessionId;
+
+	/** Whether this is an error event */
+	bool bIsError = false;
+
+	/** Duration in ms (for Result events) */
+	int32 DurationMs = 0;
+
+	/** Number of turns (for Result events) */
+	int32 NumTurns = 0;
+
+	/** Total cost in USD (for Result events) */
+	float TotalCostUsd = 0.0f;
+
+	/** Result text (for Result events) */
+	FString ResultText;
+
+	/** Raw JSON line for debugging */
+	FString RawJson;
+};
+
+/** Delegate for structured stream events */
+DECLARE_DELEGATE_OneParam(FOnClaudeStreamEvent, const FClaudeStreamEvent& /*Event*/);
+
+/**
  * Configuration for Claude Code CLI execution
  */
 struct UNREALCLAUDE_API FClaudeRequestConfig
@@ -36,6 +107,9 @@ struct UNREALCLAUDE_API FClaudeRequestConfig
 
 	/** Optional paths to attached clipboard images (PNG) for Claude to read */
 	TArray<FString> AttachedImagePaths;
+
+	/** Optional callback for structured NDJSON stream events */
+	FOnClaudeStreamEvent OnStreamEvent;
 };
 
 /**

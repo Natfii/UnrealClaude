@@ -347,13 +347,50 @@ void FMCPTaskQueue::ExecuteTask(TSharedPtr<FMCPAsyncTask> Task)
 		? Task->Parameters.ToSharedRef()
 		: MakeShared<FJsonObject>();
 
-	// Execute the tool via registry.
-	// THREAD SAFETY NOTE: ExecuteTool() handles game thread dispatch internally.
-	// If called from a background thread (as we are here), it dispatches to the
-	// game thread via AsyncTask and waits with a timeout. This ensures all UObject
-	// operations happen on the game thread while allowing async task submission.
-	// See MCPToolRegistry::ExecuteTool() for implementation details.
-	FMCPToolResult Result = ToolRegistry->ExecuteTool(Task->ToolName, Params);
+	FMCPToolResult Result;
+
+	// For long-running tools (execute_script), dispatch to game thread directly
+	// with the task's own timeout instead of the registry's 30-second default.
+	// This allows permission dialogs + Live Coding compilation to take their time.
+	IMCPTool* Tool = ToolRegistry->FindTool(Task->ToolName);
+	if (!Tool)
+	{
+		Result = FMCPToolResult::Error(FString::Printf(TEXT("Tool '%s' not found"), *Task->ToolName));
+	}
+	else if (Task->TimeoutMs > 30000)
+	{
+		// Long-running task: bypass registry's 30s game thread timeout
+		TSharedPtr<FMCPToolResult> SharedResult = MakeShared<FMCPToolResult>();
+		TSharedPtr<FEvent, ESPMode::ThreadSafe> CompletionEvent = MakeShareable(
+			FPlatformProcess::GetSynchEventFromPool(),
+			[](FEvent* Event) { FPlatformProcess::ReturnSynchEventToPool(Event); });
+		TSharedPtr<TAtomic<bool>, ESPMode::ThreadSafe> bCompleted = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
+
+		AsyncTask(ENamedThreads::GameThread, [SharedResult, Tool, Params, CompletionEvent, bCompleted]()
+		{
+			*SharedResult = Tool->Execute(Params);
+			*bCompleted = true;
+			CompletionEvent->Trigger();
+		});
+
+		const bool bSignaled = CompletionEvent->Wait(Task->TimeoutMs);
+		if (!bSignaled || !(*bCompleted))
+		{
+			UE_LOG(LogUnrealClaude, Error, TEXT("Task '%s' timed out after %d ms on game thread"),
+				*Task->ToolName, Task->TimeoutMs);
+			Result = FMCPToolResult::Error(FString::Printf(
+				TEXT("Task execution timed out after %d seconds"), Task->TimeoutMs / 1000));
+		}
+		else
+		{
+			Result = *SharedResult;
+		}
+	}
+	else
+	{
+		// Normal tools: use registry's standard game thread dispatch (30s timeout)
+		Result = ToolRegistry->ExecuteTool(Task->ToolName, Params);
+	}
 
 	// Check for cancellation after execution
 	if (Task->bCancellationRequested)

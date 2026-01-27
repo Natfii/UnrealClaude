@@ -69,7 +69,7 @@ const CONTEXT_CONFIG = {
   },
   actor: {
     files: ["actor.md"],
-    toolPatterns: [/spawn/, /actor/, /move/, /delete/, /level/],
+    toolPatterns: [/spawn/, /actor/, /move/, /delete/, /level/, /open_level/],
     keywords: [
       "actor",
       "spawn",
@@ -80,6 +80,16 @@ const CONTEXT_CONFIG = {
       "attach",
       "destroy",
       "iterate",
+      "level",
+      "map",
+      "open level",
+      "new level",
+      "load map",
+      "switch level",
+      "template map",
+      "save level",
+      "save map",
+      "save as",
     ],
   },
   assets: {
@@ -162,7 +172,7 @@ const CONTEXT_CONFIG = {
   },
   material: {
     files: ["material.md"],
-    toolPatterns: [/^material/, /skeletal_mesh_material/],
+    toolPatterns: [/^material/, /skeletal_mesh_material/, /actor_material/],
     keywords: [
       "material",
       "material instance",

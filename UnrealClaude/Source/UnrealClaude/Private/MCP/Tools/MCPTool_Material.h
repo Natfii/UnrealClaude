@@ -19,6 +19,7 @@
  * - create_material_instance: Create a new UMaterialInstanceConstant asset
  * - set_material_parameters: Set parameters on an existing material instance
  * - set_skeletal_mesh_material: Set a material slot on a USkeletalMesh asset
+ * - set_actor_material: Assign a material to an actor's mesh component at runtime
  * - get_material_info: Get information about a material or material instance
  */
 class FMCPTool_Material : public FMCPToolBase
@@ -32,6 +33,7 @@ private:
 	FMCPToolResult ExecuteCreateMaterialInstance(const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult ExecuteSetMaterialParameters(const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult ExecuteSetSkeletalMeshMaterial(const TSharedRef<FJsonObject>& Params);
+	FMCPToolResult ExecuteSetActorMaterial(const TSharedRef<FJsonObject>& Params);
 	FMCPToolResult ExecuteGetMaterialInfo(const TSharedRef<FJsonObject>& Params);
 
 	// Helper methods

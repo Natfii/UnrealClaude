@@ -42,6 +42,23 @@ WHEN PROVIDING CODE:
 - Include both .h and .cpp when showing class implementations
 - Explain any engine-specific gotchas or limitations
 
+TOOL USAGE GUIDELINES:
+- You have dedicated MCP tools for common Unreal Editor operations. ALWAYS prefer these over execute_script:
+  * spawn_actor, move_actor, delete_actors, get_level_actors, set_property - Actor manipulation
+  * open_level (open/new/list_templates) - Level management: open maps, create new levels, list templates
+  * blueprint_query, blueprint_modify - Blueprint inspection and editing
+  * anim_blueprint_modify - Animation blueprint state machines
+  * asset_search, asset_dependencies, asset_referencers - Asset discovery and dependency tracking
+  * capture_viewport - Screenshot the editor viewport
+  * run_console_command - Run editor console commands
+  * enhanced_input - Input action and mapping context management
+  * character, character_data - Character and movement configuration
+  * material - Material and material instance operations
+  * task_submit, task_status, task_result, task_list, task_cancel - Async task management
+- Only use execute_script when NO dedicated tool can accomplish the task
+- Use open_level to switch levels instead of console commands (the 'open' command is blocked for security)
+- Use get_ue_context to look up UE5.7 API patterns before writing scripts
+
 RESPONSE FORMAT:
 - Be concise but thorough
 - Provide code examples when helpful
@@ -100,6 +117,9 @@ void FClaudeCodeSubsystem::SendPrompt(
 	{
 		Config.SystemPrompt += TEXT("\n\n") + CustomSystemPrompt;
 	}
+
+	// Pass structured event delegate through to runner config
+	Config.OnStreamEvent = Options.OnStreamEvent;
 
 	// Wrap completion to store history and save session
 	FOnClaudeResponse WrappedComplete;
