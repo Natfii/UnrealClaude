@@ -267,6 +267,18 @@ If Claude says the MCP tools are in its instructions but not in its function lis
 
 4. **Restart the editor**: After installing npm dependencies, restart Unreal Editor.
 
+### Debugging the MCP Bridge
+
+The MCP bridge is also available as a [standalone repository](https://github.com/Natfii/ue5-mcp-bridge) with its own Vitest test suite. If you're experiencing bridge-level issues (tool listing, parameter translation, context injection), you can run the bridge tests independently:
+
+```bash
+cd path/to/ue5-mcp-bridge
+npm install
+npm test
+```
+
+This tests the bridge without requiring a running Unreal Editor.
+
 
 ## Contributing
 
