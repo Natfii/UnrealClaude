@@ -168,7 +168,7 @@ The plugin includes a Model Context Protocol (MCP) server with 20+ tools that ex
 
 <img width="707" height="542" alt="{AB6AC101-4A4C-4607-BFB6-187D49F5E65B}" src="https://github.com/user-attachments/assets/e0c2e398-8fcd-4ac6-ade7-d50870215ec1" />
 
-For full MCP tool documentation with parameters, examples, and API details, see the [UnrealClaude MCP Bridge](https://github.com/Natfii/unrealclaude-mcp-bridge) repository.
+For full MCP tool documentation with parameters, examples, and API details, see [UnrealClaude's MCP Bridge](https://github.com/Natfii/ue5-mcp-bridge) repository.
 
 #### Dynamic UE 5.7 Context System
 
