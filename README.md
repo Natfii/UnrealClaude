@@ -63,7 +63,12 @@ claude -p "Hello, can you see me?"
 
 Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required.
 
-1. Download or clone this repository
+> **Important:** This repo uses [Git LFS](https://git-lfs.com/) for binary files (`.dll`, `.pdb`). You must have Git LFS installed before cloning, or the binaries will be downloaded as small placeholder files and the plugin will fail to load.
+> ```bash
+> git lfs install   # one-time setup
+> ```
+
+1. Clone this repository (do not use "Download ZIP" — it won't include the binaries)
 2. Copy the `UnrealClaude` folder to your project's `Plugins` directory:
    ```
    YourProject/
