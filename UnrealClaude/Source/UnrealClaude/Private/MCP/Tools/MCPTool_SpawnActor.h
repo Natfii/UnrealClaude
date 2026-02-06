@@ -16,8 +16,9 @@ public:
 		FMCPToolInfo Info;
 		Info.Name = TEXT("spawn_actor");
 		Info.Description = TEXT(
-			"Spawn a new actor in the current level.\n\n"
-			"Use this tool to add objects like lights, meshes, characters, or custom Blueprints to your scene.\n\n"
+			"PREFERRED: Use this tool to add actors to the scene. Do not write Python scripts — call this tool directly.\n\n"
+			"Spawn a new actor in the current level. "
+			"Use this to add objects like lights, meshes, characters, or custom Blueprints to your scene.\n\n"
 			"Common class paths:\n"
 			"- 'PointLight' or '/Script/Engine.PointLight' - Point light source\n"
 			"- 'SpotLight' - Spotlight source\n"

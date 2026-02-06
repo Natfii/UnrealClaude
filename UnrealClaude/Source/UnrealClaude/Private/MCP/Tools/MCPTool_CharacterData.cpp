@@ -135,7 +135,7 @@ FMCPToolResult FMCPTool_CharacterData::ExecuteCreateCharacterData(const TSharedR
 FMCPToolResult FMCPTool_CharacterData::ExecuteQueryCharacterData(const TSharedRef<FJsonObject>& Params)
 {
 	FString SearchName = ExtractOptionalString(Params, TEXT("search_name"));
-	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 100), 1, 1000);
+	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25), 1, 1000);
 	int32 Offset = FMath::Max(0, ExtractOptionalNumber<int32>(Params, TEXT("offset"), 0));
 
 	// Get search tags if provided
@@ -382,7 +382,7 @@ FMCPToolResult FMCPTool_CharacterData::ExecuteQueryStatsTable(const TSharedRef<F
 	}
 
 	FString RowNameFilter = ExtractOptionalString(Params, TEXT("row_name"));
-	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 100), 1, 1000);
+	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25), 1, 1000);
 	int32 Offset = FMath::Max(0, ExtractOptionalNumber<int32>(Params, TEXT("offset"), 0));
 
 	TArray<TSharedPtr<FJsonValue>> RowsArray;

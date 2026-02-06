@@ -52,7 +52,7 @@ FMCPToolInfo FMCPTool_Asset::GetInfo() const
 	Info.Parameters.Add(FMCPToolParameter(TEXT("recursive"), TEXT("boolean"),
 		TEXT("Search recursively (default: false)"), false));
 	Info.Parameters.Add(FMCPToolParameter(TEXT("limit"), TEXT("integer"),
-		TEXT("Maximum results (default: 100)"), false));
+		TEXT("Maximum results (1-1000, default: 25)"), false));
 
 	Info.Annotations = FMCPToolAnnotations::Modifying();
 
@@ -298,7 +298,7 @@ FMCPToolResult FMCPTool_Asset::ExecuteListAssets(const TSharedRef<FJsonObject>& 
 		bRecursive = Params->GetBoolField(TEXT("recursive"));
 	}
 
-	int32 Limit = 100;
+	int32 Limit = 25;
 	if (Params->HasField(TEXT("limit")))
 	{
 		Limit = FMath::Clamp(Params->GetIntegerField(TEXT("limit")), 1, 1000);

@@ -33,6 +33,7 @@ import {
   log,
   fetchUnrealTools as _fetchUnrealTools,
   executeUnrealTool as _executeUnrealTool,
+  executeUnrealToolAsync as _executeUnrealToolAsync,
   checkUnrealConnection as _checkUnrealConnection,
   convertToMCPSchema,
   convertAnnotations,
@@ -43,6 +44,9 @@ const CONFIG = {
   unrealMcpUrl: process.env.UNREAL_MCP_URL || "http://localhost:3000",
   requestTimeoutMs: parseInt(process.env.MCP_REQUEST_TIMEOUT_MS, 10) || 30000,
   injectContext: process.env.INJECT_CONTEXT === "true",
+  asyncEnabled: process.env.MCP_ASYNC_ENABLED !== "false",
+  asyncTimeoutMs: parseInt(process.env.MCP_ASYNC_TIMEOUT_MS, 10) || 300000,
+  pollIntervalMs: parseInt(process.env.MCP_POLL_INTERVAL_MS, 10) || 2000,
 };
 
 // Bind CONFIG values to library functions for convenience
@@ -54,7 +58,7 @@ const checkUnrealConnection = () => _checkUnrealConnection(CONFIG.unrealMcpUrl, 
 const server = new Server(
   {
     name: "ue5-mcp-server",
-    version: "1.2.0",
+    version: "1.3.0",
   },
   {
     capabilities: {
@@ -295,10 +299,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   const toolName = name.substring(7);
-  const result = await executeUnrealTool(toolName, args);
+
+  // Tools excluded from auto-async: task_* tools are the async infrastructure itself
+  const isTaskTool = toolName.startsWith("task_");
+
+  let result;
+  if (CONFIG.asyncEnabled && !isTaskTool) {
+    const progressToken = request.params._meta?.progressToken;
+    const onProgress = progressToken
+      ? ({ progress, total, message }) => {
+          server.notification({
+            method: "notifications/progress",
+            params: { progressToken, progress, total: total || 0, message },
+          });
+        }
+      : undefined;
+
+    result = await _executeUnrealToolAsync(
+      CONFIG.unrealMcpUrl,
+      CONFIG.requestTimeoutMs,
+      toolName,
+      args,
+      {
+        onProgress,
+        pollIntervalMs: CONFIG.pollIntervalMs,
+        asyncTimeoutMs: CONFIG.asyncTimeoutMs,
+      }
+    );
+  } else {
+    result = await executeUnrealTool(toolName, args);
+  }
 
   let responseText = result.success
-    ? result.message + (result.data ? "\n\n" + JSON.stringify(result.data, null, 2) : "")
+    ? result.message + (result.data ? "\n\n" + JSON.stringify(result.data) : "")
     : `Error: ${result.message}`;
 
   if (CONFIG.injectContext && result.success) {
@@ -309,7 +342,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 
-  const response = {
+  return {
     content: [
       {
         type: "text",
@@ -318,16 +351,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     ],
     isError: !result.success,
   };
-
-  if (result.data) {
-    response.structuredContent = {
-      success: result.success,
-      message: result.message,
-      data: result.data,
-    };
-  }
-
-  return response;
 });
 
 // Start the server
@@ -340,9 +363,12 @@ async function main() {
   const contextStatus = testContext ? `OK (${categories.length} categories loaded)` : "FAILED";
 
   log.info("UE5 MCP Server started", {
-    version: "1.2.0",
+    version: "1.3.0",
     unrealUrl: CONFIG.unrealMcpUrl,
     timeoutMs: CONFIG.requestTimeoutMs,
+    asyncEnabled: CONFIG.asyncEnabled,
+    asyncTimeoutMs: CONFIG.asyncTimeoutMs,
+    pollIntervalMs: CONFIG.pollIntervalMs,
     contextInjection: CONFIG.injectContext,
     contextSystem: contextStatus,
     contextCategories: categories,

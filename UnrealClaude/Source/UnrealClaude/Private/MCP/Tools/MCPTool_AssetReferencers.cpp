@@ -14,8 +14,10 @@ FMCPToolResult FMCPTool_AssetReferencers::Execute(const TSharedRef<FJsonObject>&
 		return Error.GetValue();
 	}
 
-	// Extract optional include_soft parameter
+	// Extract optional parameters
 	bool bIncludeSoft = ExtractOptionalBool(Params, TEXT("include_soft"), true);
+	int32 Limit = FMath::Clamp(ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25), 1, 1000);
+	int32 Offset = FMath::Max(0, ExtractOptionalNumber<int32>(Params, TEXT("offset"), 0));
 
 	// Get AssetRegistry
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
@@ -62,16 +64,30 @@ FMCPToolResult FMCPTool_AssetReferencers::Execute(const TSharedRef<FJsonObject>&
 		QueryFlags
 	);
 
-	// Build result array
-	TArray<TSharedPtr<FJsonValue>> ReferencerArray;
+	// Build filtered list (skip engine/script packages)
+	TArray<FName> FilteredRefs;
 	for (const FName& RefPath : Referencers)
 	{
-		// Skip engine/script packages
 		FString PathStr = RefPath.ToString();
-		if (PathStr.StartsWith(TEXT("/Script/")) || PathStr.StartsWith(TEXT("/Engine/")))
+		if (!PathStr.StartsWith(TEXT("/Script/")) && !PathStr.StartsWith(TEXT("/Engine/")))
 		{
-			continue;
+			FilteredRefs.Add(RefPath);
 		}
+	}
+
+	// Apply pagination
+	int32 Total = FilteredRefs.Num();
+	int32 StartIndex = FMath::Min(Offset, Total);
+	int32 EndIndex = FMath::Min(StartIndex + Limit, Total);
+	int32 Count = EndIndex - StartIndex;
+	bool bHasMore = EndIndex < Total;
+
+	// Build result array for the paginated slice
+	TArray<TSharedPtr<FJsonValue>> ReferencerArray;
+	for (int32 i = StartIndex; i < EndIndex; ++i)
+	{
+		const FName& RefPath = FilteredRefs[i];
+		FString PathStr = RefPath.ToString();
 
 		TSharedPtr<FJsonObject> RefJson = MakeShared<FJsonObject>();
 		RefJson->SetStringField(TEXT("path"), PathStr);
@@ -88,25 +104,38 @@ FMCPToolResult FMCPTool_AssetReferencers::Execute(const TSharedRef<FJsonObject>&
 		ReferencerArray.Add(MakeShared<FJsonValueObject>(RefJson));
 	}
 
-	// Build result data
+	// Build result data with pagination metadata
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("asset_path"), AssetPath);
 	ResultData->SetArrayField(TEXT("referencers"), ReferencerArray);
-	ResultData->SetNumberField(TEXT("count"), ReferencerArray.Num());
+	ResultData->SetNumberField(TEXT("count"), Count);
+	ResultData->SetNumberField(TEXT("total"), Total);
+	ResultData->SetNumberField(TEXT("offset"), StartIndex);
+	ResultData->SetNumberField(TEXT("limit"), Limit);
+	ResultData->SetBoolField(TEXT("hasMore"), bHasMore);
+	if (bHasMore)
+	{
+		ResultData->SetNumberField(TEXT("nextOffset"), EndIndex);
+	}
 	ResultData->SetBoolField(TEXT("include_soft"), bIncludeSoft);
 
 	// Build message
 	FString Message;
-	if (ReferencerArray.Num() == 0)
+	if (Total == 0)
 	{
 		Message = FString::Printf(TEXT("No referencers found for '%s' - this asset appears unused"),
 			*AssetData.AssetName.ToString());
 	}
-	else
+	else if (Count == Total)
 	{
 		Message = FString::Printf(TEXT("Found %d referencer%s for '%s'"),
-			ReferencerArray.Num(),
-			ReferencerArray.Num() == 1 ? TEXT("") : TEXT("s"),
+			Total, Total == 1 ? TEXT("") : TEXT("s"),
+			*AssetData.AssetName.ToString());
+	}
+	else
+	{
+		Message = FString::Printf(TEXT("Found %d referencers (showing %d-%d of %d total) for '%s'"),
+			Count, StartIndex + 1, EndIndex, Total,
 			*AssetData.AssetName.ToString());
 	}
 

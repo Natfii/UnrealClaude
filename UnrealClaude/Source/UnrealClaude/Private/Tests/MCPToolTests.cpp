@@ -854,7 +854,7 @@ bool FMCPTool_AssetSearch_DefaultPath::RunTest(const FString& Parameters)
 		}
 		if (Param.Name == TEXT("limit"))
 		{
-			TestTrue("limit should have default 100", Param.DefaultValue == TEXT("100"));
+			TestTrue("limit should have default 25", Param.DefaultValue == TEXT("25"));
 		}
 	}
 

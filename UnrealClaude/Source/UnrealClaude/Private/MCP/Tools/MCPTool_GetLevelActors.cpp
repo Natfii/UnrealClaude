@@ -39,9 +39,11 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 	bool bIncludeHidden = false;
 	Params->TryGetBoolField(TEXT("include_hidden"), bIncludeHidden);
 
-	int32 Limit = 100;
+	bool bBrief = ExtractOptionalBool(Params, TEXT("brief"), true);
+
+	int32 Limit = 25;
 	Params->TryGetNumberField(TEXT("limit"), Limit);
-	if (Limit <= 0) Limit = 100;
+	if (Limit <= 0) Limit = 25;
 	if (Limit > 1000) Limit = 1000; // Cap at 1000 for performance
 
 	int32 Offset = 0;
@@ -107,18 +109,24 @@ FMCPToolResult FMCPTool_GetLevelActors::Execute(const TSharedRef<FJsonObject>& P
 		}
 
 		// Build actor info using base class helper
-		TSharedPtr<FJsonObject> ActorJson = BuildActorInfoWithTransformJson(Actor);
-		ActorJson->SetBoolField(TEXT("hidden"), Actor->IsHidden());
+		TSharedPtr<FJsonObject> ActorJson = bBrief
+			? BuildActorInfoJson(Actor)
+			: BuildActorInfoWithTransformJson(Actor);
 
-		// Add tags if any
-		if (Actor->Tags.Num() > 0)
+		if (!bBrief)
 		{
-			TArray<FString> TagStrings;
-			for (const FName& Tag : Actor->Tags)
+			ActorJson->SetBoolField(TEXT("hidden"), Actor->IsHidden());
+
+			// Add tags if any
+			if (Actor->Tags.Num() > 0)
 			{
-				TagStrings.Add(Tag.ToString());
+				TArray<FString> TagStrings;
+				for (const FName& Tag : Actor->Tags)
+				{
+					TagStrings.Add(Tag.ToString());
+				}
+				ActorJson->SetArrayField(TEXT("tags"), StringArrayToJsonArray(TagStrings));
 			}
-			ActorJson->SetArrayField(TEXT("tags"), StringArrayToJsonArray(TagStrings));
 		}
 
 		ActorsArray.Add(MakeShared<FJsonValueObject>(ActorJson));

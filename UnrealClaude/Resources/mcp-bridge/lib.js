@@ -147,6 +147,119 @@ export function convertToMCPSchema(unrealParams) {
 }
 
 /**
+ * Sleep for a given number of milliseconds.
+ * @param {number} ms - milliseconds to sleep
+ */
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Execute a tool via Unreal's async task queue (task_submit → poll task_status → task_result).
+ * Falls back to synchronous executeUnrealTool() if task_submit fails.
+ *
+ * @param {string} baseUrl - Unreal MCP server base URL
+ * @param {number} timeoutMs - per-request HTTP timeout in milliseconds
+ * @param {string} toolName - name of the tool to execute
+ * @param {object} args - tool arguments
+ * @param {object} [options]
+ * @param {function} [options.onProgress] - callback({progress, total, message})
+ * @param {number}   [options.pollIntervalMs=2000] - poll interval
+ * @param {number}   [options.asyncTimeoutMs=300000] - overall async timeout (5 min)
+ */
+export async function executeUnrealToolAsync(baseUrl, timeoutMs, toolName, args, options = {}) {
+  const {
+    onProgress,
+    pollIntervalMs = 2000,
+    asyncTimeoutMs = 300000,
+  } = options;
+
+  // Step 1: Submit task
+  let taskId;
+  try {
+    const submitResponse = await fetchWithTimeout(`${baseUrl}/mcp/tool/task_submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool_name: toolName,
+        params: args || {},
+        timeout_ms: asyncTimeoutMs,
+      }),
+    }, timeoutMs);
+
+    const submitData = await submitResponse.json();
+    if (!submitData.success || !submitData.data?.task_id) {
+      log.debug("task_submit failed or no task_id, falling back to sync", { tool: toolName });
+      return executeUnrealTool(baseUrl, timeoutMs, toolName, args);
+    }
+    taskId = submitData.data.task_id;
+    log.debug("Task submitted", { tool: toolName, taskId });
+  } catch (error) {
+    log.debug("task_submit error, falling back to sync", { tool: toolName, error: error.message });
+    return executeUnrealTool(baseUrl, timeoutMs, toolName, args);
+  }
+
+  // Step 2: Poll for completion
+  const deadline = Date.now() + asyncTimeoutMs;
+  let pollCount = 0;
+
+  while (Date.now() < deadline) {
+    await sleep(pollIntervalMs);
+    pollCount++;
+
+    let statusData;
+    try {
+      const statusResponse = await fetchWithTimeout(`${baseUrl}/mcp/tool/task_status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: taskId }),
+      }, timeoutMs);
+      statusData = await statusResponse.json();
+    } catch (error) {
+      log.error("task_status poll failed", { taskId, error: error.message });
+      continue;
+    }
+
+    const taskStatus = statusData.data?.status || statusData.status;
+    const progress = statusData.data?.progress ?? pollCount;
+    const total = statusData.data?.total ?? 0;
+    const progressMessage = statusData.data?.progress_message || `Polling... (${pollCount})`;
+
+    // Send progress notification
+    if (onProgress) {
+      onProgress({ progress, total, message: progressMessage });
+    }
+
+    // Check for terminal states
+    if (taskStatus === "completed" || taskStatus === "failed" || taskStatus === "cancelled") {
+      // Step 3: Retrieve result
+      try {
+        const resultResponse = await fetchWithTimeout(`${baseUrl}/mcp/tool/task_result`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_id: taskId }),
+        }, timeoutMs);
+        const resultData = await resultResponse.json();
+        log.debug("Task completed", { tool: toolName, taskId, status: taskStatus });
+        return resultData;
+      } catch (error) {
+        log.error("task_result fetch failed", { taskId, error: error.message });
+        return {
+          success: false,
+          message: `Task ${taskStatus} but failed to retrieve result: ${error.message}`,
+        };
+      }
+    }
+  }
+
+  // Async timeout exceeded
+  return {
+    success: false,
+    message: `Task timed out after ${asyncTimeoutMs}ms (task_id: ${taskId})`,
+  };
+}
+
+/**
  * Convert Unreal tool annotations to MCP annotations format
  * @param {object} unrealAnnotations - annotation object from Unreal
  */

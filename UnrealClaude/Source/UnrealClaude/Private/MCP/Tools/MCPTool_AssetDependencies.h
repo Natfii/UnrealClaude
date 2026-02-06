@@ -35,7 +35,11 @@ public:
 			FMCPToolParameter(TEXT("asset_path"), TEXT("string"),
 				TEXT("Full asset path (e.g., '/Game/Blueprints/BP_Player')"), true),
 			FMCPToolParameter(TEXT("include_soft"), TEXT("boolean"),
-				TEXT("Include soft references in addition to hard dependencies (default: true)"), false, TEXT("true"))
+				TEXT("Include soft references in addition to hard dependencies (default: true)"), false, TEXT("true")),
+			FMCPToolParameter(TEXT("limit"), TEXT("number"),
+				TEXT("Maximum results to return (1-1000, default: 25)"), false, TEXT("25")),
+			FMCPToolParameter(TEXT("offset"), TEXT("number"),
+				TEXT("Number of results to skip for pagination (default: 0)"), false, TEXT("0"))
 		};
 		Info.Annotations = FMCPToolAnnotations::ReadOnly();
 		return Info;

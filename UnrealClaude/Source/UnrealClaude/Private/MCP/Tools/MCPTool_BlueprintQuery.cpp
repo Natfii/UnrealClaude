@@ -42,7 +42,7 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteList(const TSharedRef<FJsonObject
 	FString PathFilter = ExtractOptionalString(Params, TEXT("path_filter"), TEXT("/Game/"));
 	FString TypeFilter = ExtractOptionalString(Params, TEXT("type_filter"));
 	FString NameFilter = ExtractOptionalString(Params, TEXT("name_filter"));
-	int32 Limit = ExtractOptionalNumber<int32>(Params, TEXT("limit"), 100);
+	int32 Limit = ExtractOptionalNumber<int32>(Params, TEXT("limit"), 25);
 
 	// Clamp limit
 	Limit = FMath::Clamp(Limit, 1, 1000);
@@ -192,8 +192,8 @@ FMCPToolResult FMCPTool_BlueprintQuery::ExecuteInspect(const TSharedRef<FJsonObj
 	}
 
 	// Get options
-	bool bIncludeVariables = ExtractOptionalBool(Params, TEXT("include_variables"), true);
-	bool bIncludeFunctions = ExtractOptionalBool(Params, TEXT("include_functions"), true);
+	bool bIncludeVariables = ExtractOptionalBool(Params, TEXT("include_variables"), false);
+	bool bIncludeFunctions = ExtractOptionalBool(Params, TEXT("include_functions"), false);
 	bool bIncludeGraphs = ExtractOptionalBool(Params, TEXT("include_graphs"), false);
 
 	// Serialize Blueprint info

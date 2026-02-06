@@ -43,13 +43,13 @@ public:
 			FMCPToolParameter(TEXT("name_filter"), TEXT("string"),
 				TEXT("Name substring filter"), false),
 			FMCPToolParameter(TEXT("limit"), TEXT("number"),
-				TEXT("Maximum results to return"), false, TEXT("100")),
+				TEXT("Maximum results to return (1-1000, default: 25)"), false, TEXT("25")),
 			FMCPToolParameter(TEXT("blueprint_path"), TEXT("string"),
 				TEXT("Full Blueprint asset path (required for inspect/get_graph)"), false),
 			FMCPToolParameter(TEXT("include_variables"), TEXT("boolean"),
-				TEXT("Include variable list in inspect result"), false, TEXT("true")),
+				TEXT("Include variable list in inspect result (default: false)"), false, TEXT("false")),
 			FMCPToolParameter(TEXT("include_functions"), TEXT("boolean"),
-				TEXT("Include function list in inspect result"), false, TEXT("true")),
+				TEXT("Include function list in inspect result (default: false)"), false, TEXT("false")),
 			FMCPToolParameter(TEXT("include_graphs"), TEXT("boolean"),
 				TEXT("Include graph info in inspect result"), false, TEXT("false"))
 		};

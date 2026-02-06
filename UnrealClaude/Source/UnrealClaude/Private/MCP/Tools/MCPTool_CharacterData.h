@@ -156,7 +156,7 @@ public:
 			FMCPToolParameter(TEXT("search_tags"), TEXT("array"),
 				TEXT("Filter by gameplay tags"), false),
 			FMCPToolParameter(TEXT("limit"), TEXT("number"),
-				TEXT("Max results (default: 100)"), false, TEXT("100")),
+				TEXT("Max results (1-1000, default: 25)"), false, TEXT("25")),
 			FMCPToolParameter(TEXT("offset"), TEXT("number"),
 				TEXT("Skip first N results"), false, TEXT("0")),
 
