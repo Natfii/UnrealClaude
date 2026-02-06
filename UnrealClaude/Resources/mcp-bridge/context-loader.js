@@ -191,6 +191,32 @@ const CONTEXT_CONFIG = {
       "opacity",
     ],
   },
+  parallel_workflows: {
+    files: ["parallel_workflows.md"],
+    toolPatterns: [],
+    keywords: [
+      "parallel",
+      "subagent",
+      "swarm",
+      "agent team",
+      "level setup",
+      "build a level",
+      "set up a level",
+      "create a level",
+      "build a scene",
+      "set up scene",
+      "scene setup",
+      "character pipeline",
+      "set up character",
+      "create character pipeline",
+      "multiple agents",
+      "decompose",
+      "parallelize",
+      "concurrent",
+      "batch operations",
+      "bulk create",
+    ],
+  },
 };
 
 // Cache for loaded context files
