@@ -93,13 +93,20 @@ Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required. L
 ### Option B: Engine Plugin (All Projects)
 
 Copy to your engine's plugins folder:
+
+**Windows:**
 ```
 C:\Program Files\Epic Games\UE_5.7\Engine\Plugins\Marketplace\UnrealClaude\
 ```
 
+**Linux:**
+```
+/path/to/UnrealEngine/Engine/Plugins/Marketplace/UnrealClaude/
+```
+
 Then install the MCP bridge dependencies:
 ```bash
-cd "C:\Program Files\Epic Games\UE_5.7\Engine\Plugins\Marketplace\UnrealClaude\Resources\mcp-bridge"
+cd <EnginePluginsPath>/UnrealClaude/Resources/mcp-bridge
 npm install
 ```
 
