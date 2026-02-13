@@ -31,11 +31,12 @@ bool FClipboardImageUtils::ClipboardHasImage()
 	return ::IsClipboardFormatAvailable(CF_DIB) != 0;
 #elif PLATFORM_LINUX
 	// Check if wl-paste or xclip can provide image data
+	// Route through /bin/sh so PATH is resolved (binaries may not be in /usr/bin)
 	int32 ReturnCode = -1;
 	FString StdOut, StdErr;
 
 	// Try wl-paste first (Wayland)
-	if (FPlatformProcess::ExecProcess(TEXT("/usr/bin/wl-paste"), TEXT("--list-types"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), TEXT("-c 'wl-paste --list-types 2>/dev/null'"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
 	{
 		if (StdOut.Contains(TEXT("image/png")) || StdOut.Contains(TEXT("image/")))
 		{
@@ -46,7 +47,7 @@ bool FClipboardImageUtils::ClipboardHasImage()
 	// Try xclip (X11)
 	StdOut.Empty();
 	StdErr.Empty();
-	if (FPlatformProcess::ExecProcess(TEXT("/usr/bin/xclip"), TEXT("-selection clipboard -t TARGETS -o"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), TEXT("-c 'xclip -selection clipboard -t TARGETS -o 2>/dev/null'"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
 	{
 		if (StdOut.Contains(TEXT("image/png")))
 		{
