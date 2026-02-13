@@ -34,7 +34,7 @@ Automation RunTests UnrealClaude
 ## Unreal Engine 5.7 C++ Standards
 
 ### IMPORTANT: Stay Focused on UE 5.7
-- This project targets **Unreal Engine 5.7.1** exclusively
+- This project targets **Unreal Engine 5.7** exclusively
 - Use UE 5.7 API patterns and conventions
 - Do NOT suggest deprecated APIs or patterns from older engine versions
 
@@ -146,6 +146,40 @@ Resources/mcp-bridge/contexts/
 - All code examples must be verified against UE 5.7 API
 - Use web search to confirm API signatures before documenting
 - Remove deprecated patterns from older engine versions
+
+### UE 5.7 Engine Source Reference (Optional)
+
+If you have access to the EpicGames GitHub organization, you can clone the engine source locally for Claude Code to use as an authoritative API reference. This is far more accurate than web search for verifying function signatures, includes, and specifiers.
+
+**Setup** (sparse + shallow clone, ~2-5 GB instead of 30+ GB):
+```bash
+mkdir -p "<YOUR_PATH>"
+cd "<YOUR_PATH>"
+git clone --depth 1 --branch 5.7.3-release --filter=blob:none --sparse \
+  https://github.com/EpicGames/UnrealEngine.git
+cd UnrealEngine
+git sparse-checkout set Engine/Source
+```
+
+**Fill in your path below** (uncomment and update):
+<!-- UE_SOURCE_PATH: <YOUR_PATH>/UnrealEngine/Engine/Source/ -->
+
+**When to use the engine source:**
+- Verifying UPROPERTY/UFUNCTION specifiers and their exact syntax
+- Finding the correct `#include` path for a class or struct
+- Checking function signatures, parameter types, and return values
+- Understanding base class implementations before overriding
+
+**Key subdirectories:**
+
+| Directory | Contents |
+|-----------|----------|
+| `Runtime/Engine/Classes/` | Core classes: AActor, UWorld, UGameInstance, components |
+| `Runtime/CoreUObject/` | UObject, UPROPERTY, reflection, garbage collection |
+| `Editor/UnrealEd/` | Editor subsystems, FBlueprintEditorUtils, asset tools |
+| `Runtime/AnimGraphRuntime/` | Animation blueprint nodes, state machine runtime |
+| `Runtime/EnhancedInput/` | Enhanced Input System |
+| `Runtime/SlateCore/` + `Runtime/Slate/` | Slate UI framework |
 
 ---
 

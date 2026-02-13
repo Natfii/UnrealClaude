@@ -2,14 +2,14 @@
 
 ![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.7-313131?style=flat&logo=unrealengine&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat&logo=c%2B%2B&logoColor=white)
-![Platform](https://img.shields.io/badge/Platform-Win64-0078D6?style=flat&logo=windows&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Win64%20%7C%20Linux-0078D6?style=flat&logo=windows&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-Integration-D97757?style=flat&logo=anthropic&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-20%2B%20Tools-8A2BE2?style=flat)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
 **Claude Code CLI integration for Unreal Engine 5.7** - Get AI coding assistance with built-in UE5.7 documentation context directly in the editor.
 
-> **Windows Only** - This plugin uses Windows-specific process APIs to execute the Claude Code CLI.
+> **Supported Platforms:** Windows (Win64) and Linux. Mac support is not yet available.
 
 ## Overview
 
@@ -24,7 +24,7 @@ UnrealClaude integrates the [Claude Code CLI](https://docs.anthropic.com/en/docs
 - **Blueprint Editing** - Create and modify Blueprints, Animation Blueprints, state machines (Few bugs still, don't rely on fully)
 - **Level Management** - Open, create, and manage levels and map templates programmatically
 - **Asset Management** - Search assets, query dependencies and referencers
-- **Async Task Queue** - Long-running operations won't timeout (WIP)
+- **Async Task Queue** - Long-running operations won't timeout
 - **Script Execution** - Claude can write, compile (via Live Coding), and execute scripts with your permission
 - **Session Persistence** - Conversation history saved across editor sessions
 - **Project-Aware** - Automatically gathers project context (modules, plugins, assets) and is able to see editor viewports
@@ -61,7 +61,7 @@ claude -p "Hello, can you see me?"
 
 ### Option A: Copy to Project Plugins (Recommended)
 
-Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required.
+Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required. Linux users will need to build from source (see below).
 
 > **Important:** This repo uses [Git LFS](https://git-lfs.com/) for binary files (`.dll`, `.pdb`). You must have Git LFS installed before cloning, or the binaries will be downloaded as small placeholder files and the plugin will fail to load.
 > ```bash
@@ -76,7 +76,8 @@ Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required.
    ├── Source/
    └── Plugins/
        └── UnrealClaude/
-           ├── Binaries/Win64/    # Prebuilt binaries
+           ├── Binaries/
+           │   └── Win64/         # Prebuilt binaries (Windows)
            ├── Source/
            ├── Resources/
            ├── Config/
@@ -105,9 +106,15 @@ npm install
 ### Building from Source
 
 If you need to rebuild (different UE version, modifications, etc.):
+
+**Windows:**
 ```bash
-# From UE installation directory
 Engine\Build\BatchFiles\RunUAT.bat BuildPlugin -Plugin="PATH\TO\UnrealClaude.uplugin" -Package="OUTPUT\PATH" -TargetPlatforms=Win64
+```
+
+**Linux:**
+```bash
+Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="/path/to/UnrealClaude.uplugin" -Package="/output/path" -TargetPlatforms=Linux
 ```
 
 ## Usage
@@ -245,7 +252,7 @@ Claude Code executes in your project directory and may read files for context. L
 
 ### Plugin doesn't compile
 
-Ensure you're on Unreal Engine 5.7 for Windows. This plugin uses Windows-specific APIs.
+Ensure you're on Unreal Engine 5.7. Supported platforms are Windows (Win64) and Linux.
 
 ### MCP Server not starting
 
@@ -290,7 +297,8 @@ This tests the bridge without requiring a running Unreal Editor.
 
 Feel free to fork for your own needs! Possible areas for improvement:
 
-- [ ] Mac/Linux support
+- [x] Linux support (thanks [@bearyjd](https://github.com/bearyjd))
+- [ ] Mac support
 - [ ] Context menu integration (right-click on code)
 - [ ] Blueprint node for runtime Claude queries
 - [ ] Additional MCP tools

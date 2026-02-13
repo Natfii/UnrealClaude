@@ -63,11 +63,12 @@ public class UnrealClaude : ModuleRules
 			}
 		);
 
+		// Clipboard support (FPlatformApplicationMisc) on all platforms
+		PrivateDependencyModuleNames.Add("ApplicationCore");
+
 		// Windows only
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{
-			PrivateDependencyModuleNames.Add("ApplicationCore");
-
 			// LiveCoding is only available in editor builds on Windows
 			if (Target.bBuildEditor)
 			{

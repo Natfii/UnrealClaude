@@ -14,20 +14,20 @@
  * This description is stored in history for context restoration.
  *
  * C++ Header Format:
- * /**
- *  * @UnrealClaude Script
- *  * @Name: MyScript
- *  * @Description: Brief description of what this script does
- *  * @Created: 2026-01-03T10:30:00Z
- *  * /
+ * @code
+ *   // @UnrealClaude Script
+ *   // @Name: MyScript
+ *   // @Description: Brief description of what this script does
+ *   // @Created: 2026-01-03T10:30:00Z
+ * @endcode
  *
  * Python Header Format:
- * """
- * @UnrealClaude Script
- * @Name: MyScript
- * @Description: Brief description of what this script does
- * @Created: 2026-01-03T10:30:00Z
- * """
+ * @code
+ *   # @UnrealClaude Script
+ *   # @Name: MyScript
+ *   # @Description: Brief description of what this script does
+ *   # @Created: 2026-01-03T10:30:00Z
+ * @endcode
  */
 class FMCPTaskQueue;
 
