@@ -6,9 +6,10 @@
 #include "IClaudeRunner.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
+#include "HAL/PlatformProcess.h"
 
 /**
- * Async runner for Claude Code CLI commands (Windows implementation)
+ * Async runner for Claude Code CLI commands (cross-platform implementation)
  * Executes 'claude -p' in print mode and captures output
  * Implements IClaudeRunner interface for abstraction
  */
@@ -62,7 +63,6 @@ private:
 	/** Accumulated text from assistant messages for the final response */
 	FString AccumulatedResponseText;
 
-#if PLATFORM_WINDOWS
 	/** Create pipes for process stdout/stderr capture */
 	bool CreateProcessPipes();
 
@@ -77,7 +77,6 @@ private:
 
 	/** Report completion to callback on game thread */
 	void ReportCompletion(const FString& Output, bool bSuccess);
-#endif
 
 	FClaudeRequestConfig CurrentConfig;
 	FOnClaudeResponse OnCompleteDelegate;
@@ -87,15 +86,14 @@ private:
 	FThreadSafeCounter StopTaskCounter;
 	TAtomic<bool> bIsExecuting;
 
-	// Process handles for cancellation (Windows HANDLE stored as void*)
-	void* ProcessHandle;
+	// Process handle (FProcHandle stored as void* for atomic exchange compatibility)
+	FProcHandle ProcessHandle;
+
+	// Pipe handles (UE cross-platform pipe handles)
 	void* ReadPipe;
 	void* WritePipe;
 	void* StdInReadPipe;
 	void* StdInWritePipe;
-
-	// Last Windows error code for detailed error reporting
-	uint32 LastProcessError = 0;
 
 	// Temp file paths for prompts (to avoid command line length limits)
 	FString SystemPromptFilePath;

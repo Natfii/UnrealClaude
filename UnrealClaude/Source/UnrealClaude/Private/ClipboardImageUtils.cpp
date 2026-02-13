@@ -3,6 +3,7 @@
 #include "ClipboardImageUtils.h"
 #include "UnrealClaudeModule.h"
 #include "UnrealClaudeConstants.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
@@ -28,6 +29,32 @@ bool FClipboardImageUtils::ClipboardHasImage()
 {
 #if PLATFORM_WINDOWS
 	return ::IsClipboardFormatAvailable(CF_DIB) != 0;
+#elif PLATFORM_LINUX
+	// Check if wl-paste or xclip can provide image data
+	int32 ReturnCode = -1;
+	FString StdOut, StdErr;
+
+	// Try wl-paste first (Wayland)
+	if (FPlatformProcess::ExecProcess(TEXT("/usr/bin/wl-paste"), TEXT("--list-types"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	{
+		if (StdOut.Contains(TEXT("image/png")) || StdOut.Contains(TEXT("image/")))
+		{
+			return true;
+		}
+	}
+
+	// Try xclip (X11)
+	StdOut.Empty();
+	StdErr.Empty();
+	if (FPlatformProcess::ExecProcess(TEXT("/usr/bin/xclip"), TEXT("-selection clipboard -t TARGETS -o"), &ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	{
+		if (StdOut.Contains(TEXT("image/png")))
+		{
+			return true;
+		}
+	}
+
+	return false;
 #else
 	return false;
 #endif
@@ -171,8 +198,61 @@ bool FClipboardImageUtils::SaveClipboardImageToFile(FString& OutFilePath, const 
 		*OutFilePath, Width, Height, CompressedData.Num());
 	return true;
 
+#elif PLATFORM_LINUX
+	// On Linux, use wl-paste (Wayland) or xclip (X11) to get clipboard image as PNG
+
+	// Ensure directory exists
+	IFileManager::Get().MakeDirectory(*SaveDirectory, true);
+
+	// Generate filename with timestamp
+	FDateTime Now = FDateTime::Now();
+	FString FileName = FString::Printf(TEXT("clipboard_%04d%02d%02d_%02d%02d%02d.png"),
+		Now.GetYear(), Now.GetMonth(), Now.GetDay(),
+		Now.GetHour(), Now.GetMinute(), Now.GetSecond());
+
+	OutFilePath = FPaths::Combine(SaveDirectory, FileName);
+
+	int32 ReturnCode = -1;
+	FString StdOut, StdErr;
+
+	// Try wl-paste first (Wayland) - outputs PNG directly to stdout
+	// We shell out via /bin/sh since ExecProcess captures stdout as text, not binary
+	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), *FString::Printf(TEXT("-c 'wl-paste --type image/png > \"%s\"'"), *OutFilePath),
+		&ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	{
+		if (IFileManager::Get().FileExists(*OutFilePath) && IFileManager::Get().FileSize(*OutFilePath) > 0)
+		{
+			UE_LOG(LogUnrealClaude, Log, TEXT("Saved clipboard image via wl-paste: %s (%lld bytes)"),
+				*OutFilePath, IFileManager::Get().FileSize(*OutFilePath));
+			return true;
+		}
+	}
+
+	// Try xclip (X11)
+	StdOut.Empty();
+	StdErr.Empty();
+	if (FPlatformProcess::ExecProcess(TEXT("/bin/sh"), *FString::Printf(TEXT("-c 'xclip -selection clipboard -t image/png -o > \"%s\"'"), *OutFilePath),
+		&ReturnCode, &StdOut, &StdErr) && ReturnCode == 0)
+	{
+		if (IFileManager::Get().FileExists(*OutFilePath) && IFileManager::Get().FileSize(*OutFilePath) > 0)
+		{
+			UE_LOG(LogUnrealClaude, Log, TEXT("Saved clipboard image via xclip: %s (%lld bytes)"),
+				*OutFilePath, IFileManager::Get().FileSize(*OutFilePath));
+			return true;
+		}
+	}
+
+	// Clean up empty/failed file
+	if (IFileManager::Get().FileExists(*OutFilePath))
+	{
+		IFileManager::Get().Delete(*OutFilePath);
+	}
+
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to get clipboard image. Install wl-paste (wl-clipboard) or xclip."));
+	return false;
+
 #else
-	UE_LOG(LogUnrealClaude, Warning, TEXT("Clipboard image paste is only supported on Windows"));
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Clipboard image paste is not supported on this platform"));
 	return false;
 #endif
 }
