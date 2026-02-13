@@ -927,14 +927,14 @@ void FClaudeCodeRunner::Exit()
 bool FClaudeCodeRunner::CreateProcessPipes()
 {
 	// Create stdout pipe (we read from ReadPipe, child writes to WritePipe)
-	if (!FPlatformProcess::CreatePipe(ReadPipe, WritePipe))
+	if (!FPlatformProcess::CreatePipe(ReadPipe, WritePipe, false))
 	{
 		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to create stdout pipe"));
 		return false;
 	}
 
 	// Create stdin pipe (child reads from StdInReadPipe, we write to StdInWritePipe)
-	if (!FPlatformProcess::CreatePipe(StdInReadPipe, StdInWritePipe))
+	if (!FPlatformProcess::CreatePipe(StdInReadPipe, StdInWritePipe, true))
 	{
 		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to create stdin pipe"));
 		FPlatformProcess::ClosePipe(ReadPipe, WritePipe);
@@ -1160,9 +1160,11 @@ void FClaudeCodeRunner::ExecuteProcess()
 		// Write to stdin
 		if (!StdinPayload.IsEmpty())
 		{
-			bool bWritten = FPlatformProcess::WritePipe(StdInWritePipe, StdinPayload);
-			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote to Claude stdin (stream-json, success=%d, images: %d, system: %d chars, user: %d chars)"),
-				bWritten, CurrentConfig.AttachedImagePaths.Num(),
+			FTCHARToUTF8 Utf8Payload(*StdinPayload);
+			int32 BytesWritten = 0;
+			bool bWritten = FPlatformProcess::WritePipe(StdInWritePipe, (const uint8*)Utf8Payload.Get(), Utf8Payload.Length(), &BytesWritten);
+			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote to Claude stdin (stream-json, success=%d, %d/%d bytes, images: %d, system: %d chars, user: %d chars)"),
+				bWritten, BytesWritten, Utf8Payload.Length(), CurrentConfig.AttachedImagePaths.Num(),
 				CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
 		}
 
