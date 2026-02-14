@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolBase.h"
+#include "MCP/MCPToolBase.h"
 
 /**
  * MCP Tool: Capture a screenshot of the active viewport

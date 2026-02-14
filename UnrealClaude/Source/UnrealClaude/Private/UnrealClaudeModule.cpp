@@ -34,7 +34,7 @@ void FUnrealClaudeModule::StartupModule()
 	// Register commands
 	FUnrealClaudeCommands::Register();
 	
-	PluginCommands = MakeShareable(new FUICommandList);
+	PluginCommands = MakeShared<FUICommandList>();
 	
 	// Map commands to actions
 	PluginCommands->MapAction(

@@ -31,7 +31,7 @@ class UEdGraph;
  * - UBlendSpace1D: 1D blend space (single parameter)
  * - UAnimMontage: Montage for triggered animations
  */
-class UNREALCLAUDE_API FAnimAssetManager
+class FAnimAssetManager
 {
 public:
 	// ===== Asset Loading =====

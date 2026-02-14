@@ -19,7 +19,7 @@ class UBlendSpace1D;
  * - Connecting animation nodes to output poses
  * - Clearing state graphs
  */
-class UNREALCLAUDE_API FAnimAssetNodeFactory
+class FAnimAssetNodeFactory
 {
 public:
 	/**

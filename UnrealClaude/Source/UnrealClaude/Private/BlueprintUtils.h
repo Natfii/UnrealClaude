@@ -37,7 +37,7 @@
  *
  * New code should use the specific module classes directly.
  */
-class UNREALCLAUDE_API FBlueprintUtils
+class FBlueprintUtils
 {
 public:
 	// ===== Blueprint Loading & Validation (-> FBlueprintLoader) =====

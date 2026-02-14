@@ -72,7 +72,7 @@ struct FPinSearchConfig
  * - Managing node connections
  * - Pin validation and type checking
  */
-class UNREALCLAUDE_API FAnimNodePinUtils
+class FAnimNodePinUtils
 {
 public:
 	/**

@@ -125,7 +125,7 @@ private:
 	TMap<FGuid, TSharedPtr<FMCPAsyncTask>> Tasks;
 
 	/** Queue of pending task IDs */
-	TQueue<FGuid> PendingQueue;
+	TQueue<FGuid, EQueueMode::Mpsc> PendingQueue;
 
 	/** Currently running task count */
 	TAtomic<int32> RunningTaskCount;

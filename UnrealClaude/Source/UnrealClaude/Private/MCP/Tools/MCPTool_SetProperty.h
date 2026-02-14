@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolBase.h"
+#include "MCP/MCPToolBase.h"
 
 /**
  * MCP Tool: Set a property on an actor

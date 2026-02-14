@@ -3,8 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolBase.h"
-#include "../MCPTaskQueue.h"
+#include "MCP/MCPToolBase.h"
+#include "MCP/MCPTaskQueue.h"
 
 /**
  * MCP Tool: List all async tasks

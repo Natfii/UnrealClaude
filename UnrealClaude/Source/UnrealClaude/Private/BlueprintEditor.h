@@ -21,7 +21,7 @@
  * - Containers: TArray<T>, TSet<T>
  * - Object references: AActor*, UTexture2D*, etc.
  */
-class UNREALCLAUDE_API FBlueprintEditor
+class FBlueprintEditor
 {
 public:
 	// ===== Variable Management =====

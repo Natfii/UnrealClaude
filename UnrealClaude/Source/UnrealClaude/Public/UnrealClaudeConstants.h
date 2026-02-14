@@ -102,7 +102,7 @@ namespace UnrealClaudeConstants
 		/** Characters that are dangerous in actor names, paths, and class paths
 		 *  Used for injection attack prevention and input sanitization
 		 */
-		static const TCHAR* DangerousChars = TEXT("<>|&;`$(){}[]!*?~");
+		inline constexpr const TCHAR* DangerousChars = TEXT("<>|&;`$(){}[]!*?~");
 
 		/** Maximum length for actor names */
 		constexpr int32 MaxActorNameLength = 256;
@@ -164,6 +164,9 @@ namespace UnrealClaudeConstants
 		/** Maximum output log lines to return */
 		constexpr int32 MaxOutputLogLines = 1000;
 
+		/** Maximum HTTP request body size in bytes (1 MB) */
+		constexpr int32 MaxRequestBodySize = 1024 * 1024;
+
 		/** Expected MCP tools that should be registered at startup */
 		inline const TArray<FString> ExpectedTools = {
 			// Actor tools
@@ -205,7 +208,7 @@ namespace UnrealClaudeConstants
 		constexpr double MaxScreenshotAgeSeconds = 3600.0;
 
 		/** Subdirectory under Saved/UnrealClaude/ for clipboard screenshots */
-		static const TCHAR* ScreenshotSubdirectory = TEXT("screenshots");
+		inline constexpr const TCHAR* ScreenshotSubdirectory = TEXT("screenshots");
 
 		/** Thumbnail preview size in the input area (pixels) */
 		constexpr float ThumbnailSize = 64.0f;

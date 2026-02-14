@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 3,
-	"VersionName": "1.2.0",
+	"Version": 4,
+	"VersionName": "1.2.1",
 	"FriendlyName": "Unreal Claude",
 	"Description": "Claude Code CLI integration for Unreal Engine 5.7. Get AI coding assistance with built-in UE5.7 documentation context directly in the editor.",
 	"Category": "Editor",

@@ -31,7 +31,7 @@ class UEdGraph;
  *                   ├─ UAnimStateNode (states)
  *                   └─ UAnimStateTransitionNode (transitions)
  */
-class UNREALCLAUDE_API FAnimStateMachineEditor
+class FAnimStateMachineEditor
 {
 public:
 	// ===== State Machine Management =====

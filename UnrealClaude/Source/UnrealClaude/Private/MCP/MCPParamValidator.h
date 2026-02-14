@@ -8,7 +8,7 @@
  * Utility class for validating MCP tool parameters
  * Provides common validation functions to prevent injection attacks and invalid input
  */
-class UNREALCLAUDE_API FMCPParamValidator
+class FMCPParamValidator
 {
 public:
 	/**

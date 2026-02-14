@@ -36,7 +36,7 @@ enum class EComparisonPinType : uint8
  * - Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual: Direct comparisons
  * - And, Or, Not: Logical operators
  */
-class UNREALCLAUDE_API FAnimTransitionConditionFactory
+class FAnimTransitionConditionFactory
 {
 public:
 	/**

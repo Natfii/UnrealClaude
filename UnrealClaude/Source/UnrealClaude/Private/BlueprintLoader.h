@@ -65,7 +65,7 @@ struct FBlueprintCompileResult
  * - Prevents path traversal attacks
  * - Validates character safety
  */
-class UNREALCLAUDE_API FBlueprintLoader
+class FBlueprintLoader
 {
 public:
 	/**

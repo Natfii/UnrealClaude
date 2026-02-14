@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../MCPToolBase.h"
+#include "MCP/MCPToolBase.h"
 
 /**
  * MCP Tool: Open, create, or list level maps in the editor

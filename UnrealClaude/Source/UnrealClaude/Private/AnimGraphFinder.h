@@ -18,7 +18,7 @@ class UEdGraph;
  * - Finding transition graphs
  * - Finding AnimGraph root node
  */
-class UNREALCLAUDE_API FAnimGraphFinder
+class FAnimGraphFinder
 {
 public:
 	/**

@@ -212,6 +212,12 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 
 	// Parse JSON body for parameters
 	TSharedPtr<FJsonObject> ParamsJson;
+	if (Request.Body.Num() > UnrealClaudeConstants::MCPServer::MaxRequestBodySize)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Request body too large: %d bytes (max %d)"), Request.Body.Num(), UnrealClaudeConstants::MCPServer::MaxRequestBodySize);
+		OnComplete(CreateErrorResponse(TEXT("Request body too large"), EHttpServerResponseCodes::BadRequest));
+		return true;
+	}
 	if (Request.Body.Num() > 0)
 	{
 		// Ensure null-termination for safe string conversion

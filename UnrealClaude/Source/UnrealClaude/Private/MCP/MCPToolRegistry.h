@@ -174,7 +174,7 @@ public:
 /**
  * Registry for managing MCP tools
  */
-class UNREALCLAUDE_API FMCPToolRegistry
+class FMCPToolRegistry
 {
 public:
 	FMCPToolRegistry();

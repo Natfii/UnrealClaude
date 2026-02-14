@@ -1,7 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "MCPTool_ExecuteScript.h"
-#include "../MCPTaskQueue.h"
+#include "MCP/MCPTaskQueue.h"
 #include "ScriptExecutionManager.h"
 #include "ScriptTypes.h"
 #include "UnrealClaudeModule.h"

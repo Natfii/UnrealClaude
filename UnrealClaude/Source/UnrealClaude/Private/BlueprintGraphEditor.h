@@ -28,7 +28,7 @@
  * - Format: "{NodeType}_{Context}_{Counter}"
  * - Thread-safe counter for uniqueness
  */
-class UNREALCLAUDE_API FBlueprintGraphEditor
+class FBlueprintGraphEditor
 {
 public:
 	// ===== Graph Finding =====

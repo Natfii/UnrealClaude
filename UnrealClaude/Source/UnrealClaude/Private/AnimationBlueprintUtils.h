@@ -38,7 +38,7 @@ class UAnimStateTransitionNode;
  * - Condition Nodes: add_condition_node, connect_condition_nodes
  * - Animation: set_state_animation, find_animations
  */
-class UNREALCLAUDE_API FAnimationBlueprintUtils
+class FAnimationBlueprintUtils
 {
 public:
 	// ===== AnimBlueprint Access (Level 1) =====

@@ -35,7 +35,7 @@ class UAnimMontage;
  * - Greater, Less, GreaterEqual, LessEqual, Equal, NotEqual: Direct comparison operators
  * - And, Or, Not: Logical operators
  */
-class UNREALCLAUDE_API FAnimGraphEditor
+class FAnimGraphEditor
 {
 public:
 	// ===== Graph Finding =====

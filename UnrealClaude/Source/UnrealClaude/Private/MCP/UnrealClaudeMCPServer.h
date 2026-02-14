@@ -13,7 +13,7 @@ class FMCPToolRegistry;
  * MCP HTTP Server for editor control
  * Provides REST API endpoints for Claude to interact with the Unreal Editor
  */
-class UNREALCLAUDE_API FUnrealClaudeMCPServer
+class FUnrealClaudeMCPServer
 {
 public:
 	FUnrealClaudeMCPServer();

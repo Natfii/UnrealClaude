@@ -47,7 +47,7 @@ struct FLevelActorInfo
 /**
  * Structured project context information
  */
-struct UNREALCLAUDE_API FProjectContext
+struct FProjectContext
 {
 	/** Project name */
 	FString ProjectName;
@@ -95,7 +95,7 @@ struct UNREALCLAUDE_API FProjectContext
 /**
  * Manager for gathering and caching project context
  */
-class UNREALCLAUDE_API FProjectContextManager
+class FProjectContextManager
 {
 public:
 	static FProjectContextManager& Get();
