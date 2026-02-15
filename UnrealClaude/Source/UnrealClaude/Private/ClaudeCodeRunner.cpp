@@ -174,11 +174,14 @@ FString FClaudeCodeRunner::GetClaudePath()
 
 #if PLATFORM_WINDOWS
 	const TCHAR* WhichCmd = TEXT("where");
+	const TCHAR* WhichArgs = TEXT("claude");
 #else
-	const TCHAR* WhichCmd = TEXT("/usr/bin/which");
+	// Route through /bin/sh for PATH resolution (consistent with clipboard handling)
+	const TCHAR* WhichCmd = TEXT("/bin/sh");
+	const TCHAR* WhichArgs = TEXT("-c 'which claude 2>/dev/null'");
 #endif
 
-	if (FPlatformProcess::ExecProcess(WhichCmd, TEXT("claude"), &ReturnCode, &WhereOutput, &WhereErrors) && ReturnCode == 0)
+	if (FPlatformProcess::ExecProcess(WhichCmd, WhichArgs, &ReturnCode, &WhereOutput, &WhereErrors) && ReturnCode == 0)
 	{
 		WhereOutput.TrimStartAndEndInline();
 		TArray<FString> Lines;
