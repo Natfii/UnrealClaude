@@ -57,40 +57,50 @@ claude -p "Hello, can you see me?"
 
 <img width="1222" height="99" alt="Screenshot 2026-02-06 112433" src="https://github.com/user-attachments/assets/61d72364-f7bc-4f34-a768-aedc0f5cea2e" />
 
-(Check the Editor catagory in the plugin browser. You might need to scroll down for it if search doesn't pick it up)
+(Check the Editor category in the plugin browser. You might need to scroll down for it if search doesn't pick it up)
 
-### Option A: Copy to Project Plugins (Recommended)
+### Step 1: Clone and Build
 
-Prebuilt binaries for **UE 5.7 Win64** are included - no compilation required. Linux users will need to build from source (see below).
+This plugin must be built from source for your platform and engine version. No prebuilt binaries are included.
 
-> **Important:** This repo uses [Git LFS](https://git-lfs.com/) for binary files (`.dll`, `.pdb`). You must have Git LFS installed before cloning, or the binaries will be downloaded as small placeholder files and the plugin will fail to load.
-> ```bash
-> git lfs install   # one-time setup
-> ```
-
-1. Clone this repository (do not use "Download ZIP" — it won't include the binaries)
-2. Copy the `UnrealClaude` folder to your project's `Plugins` directory:
-   ```
-   YourProject/
-   ├── Content/
-   ├── Source/
-   └── Plugins/
-       └── UnrealClaude/
-           ├── Binaries/
-           │   └── Win64/         # Prebuilt binaries (Windows)
-           ├── Source/
-           ├── Resources/
-           ├── Config/
-           └── UnrealClaude.uplugin
-   ```
-3. **Install MCP Bridge dependencies** (required for Blueprint tools and editor integration):
+1. Clone this repository:
    ```bash
-   cd YourProject/Plugins/UnrealClaude/Resources/mcp-bridge
-   npm install
+   git clone https://github.com/Natfii/UnrealClaude.git
    ```
-4. Launch the editor - the plugin will load automatically
 
-### Option B: Engine Plugin (All Projects)
+2. Build the plugin:
+
+   **Windows:**
+   ```bash
+   Engine\Build\BatchFiles\RunUAT.bat BuildPlugin -Plugin="PATH\TO\UnrealClaude\UnrealClaude\UnrealClaude.uplugin" -Package="OUTPUT\PATH" -TargetPlatforms=Win64
+   ```
+
+   **Linux:**
+   ```bash
+   Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="/path/to/UnrealClaude/UnrealClaude/UnrealClaude.uplugin" -Package="/output/path" -TargetPlatforms=Linux
+   ```
+
+### Step 2: Install the Plugin
+
+Copy the built plugin to either your **project** or **engine** plugins folder.
+
+**Option A: Project Plugin (Recommended)**
+
+Copy the build output to your project's `Plugins` directory:
+```
+YourProject/
+├── Content/
+├── Source/
+└── Plugins/
+    └── UnrealClaude/
+        ├── Binaries/
+        ├── Source/
+        ├── Resources/
+        ├── Config/
+        └── UnrealClaude.uplugin
+```
+
+**Option B: Engine Plugin (All Projects)**
 
 Copy to your engine's plugins folder:
 
@@ -104,25 +114,17 @@ C:\Program Files\Epic Games\UE_5.7\Engine\Plugins\Marketplace\UnrealClaude\
 /path/to/UnrealEngine/Engine/Plugins/Marketplace/UnrealClaude/
 ```
 
-Then install the MCP bridge dependencies:
+### Step 3: Install MCP Bridge Dependencies
+
+Required for Blueprint tools and editor integration:
 ```bash
-cd <EnginePluginsPath>/UnrealClaude/Resources/mcp-bridge
+cd <PluginPath>/UnrealClaude/Resources/mcp-bridge
 npm install
 ```
 
-### Building from Source
+### Step 4: Launch
 
-If you need to rebuild (different UE version, modifications, etc.):
-
-**Windows:**
-```bash
-Engine\Build\BatchFiles\RunUAT.bat BuildPlugin -Plugin="PATH\TO\UnrealClaude.uplugin" -Package="OUTPUT\PATH" -TargetPlatforms=Win64
-```
-
-**Linux:**
-```bash
-Engine/Build/BatchFiles/RunUAT.sh BuildPlugin -Plugin="/path/to/UnrealClaude.uplugin" -Package="/output/path" -TargetPlatforms=Linux
-```
+Launch the editor - the plugin will load automatically.
 
 ## Usage
 
