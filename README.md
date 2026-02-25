@@ -126,6 +126,29 @@ npm install
 
 Launch the editor - the plugin will load automatically.
 
+## Linux Quick Start (Rocky/Fedora)
+
+For full details, see [INSTALL_LINUX.md](INSTALL_LINUX.md).
+
+1. **Install Libraries:**
+   ```bash
+   sudo dnf install -y nss nspr mesa-libgbm libXcomposite libXdamage libXrandr alsa-lib pciutils-libs libXcursor atk at-spi2-atk pango cairo gdk-pixbuf2 gtk3
+   ```
+2. **Install Clipboard Support:**
+   ```bash
+   sudo dnf install -y wl-clipboard   # Wayland
+   sudo dnf install -y xclip          # X11 fallback
+   ```
+3. **Setup Wayland:**
+   ```bash
+   export SDL_VIDEODRIVER=wayland
+   export UE_Linux_EnableWaylandNative=1
+   ```
+4. **Build and Launch:**
+   ```bash
+   ./UnrealEditor -vulkan
+   ```
+
 ## Usage
 
 ### Opening the Claude Panel
@@ -308,9 +331,7 @@ Feel free to fork for your own needs! Possible areas for improvement:
 
 - [x] Linux support (thanks [@bearyjd](https://github.com/bearyjd))
 - [ ] Mac support
-- [ ] Context menu integration (right-click on code)
-- [ ] Blueprint node for runtime Claude queries
-- [ ] Additional MCP tools
+- [ ] Additional MCP tools (current tools need refractoring, no new ones for now)
 
 ## License
 
