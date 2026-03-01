@@ -9,7 +9,7 @@
 
 **Claude Code CLI integration for Unreal Engine 5.7** - Get AI coding assistance with built-in UE5.7 documentation context directly in the editor.
 
-> **Supported Platforms:** Windows (Win64) and Linux. Mac support is not yet available.
+> **Supported Platforms:** Windows (Win64) and Linux. On Windows please use Claude Code 2.1.52 or older if you run into tool issues. Mac support is not yet available.
 
 ## Overview
 
