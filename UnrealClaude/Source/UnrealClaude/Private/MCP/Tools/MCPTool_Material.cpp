@@ -10,6 +10,9 @@
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
@@ -652,6 +655,91 @@ TSharedPtr<FJsonObject> FMCPTool_Material::BuildMaterialInfoJson(UMaterialInterf
 			TexturesObj->SetStringField(Param.ParameterInfo.Name.ToString(), TexturePath);
 		}
 		Info->SetObjectField(TEXT("texture_parameters"), TexturesObj);
+	}
+	else if (UMaterial* BaseMat = Cast<UMaterial>(Material))
+	{
+		Info->SetBoolField(TEXT("is_instance"), false);
+
+		// Material properties
+		Info->SetStringField(TEXT("blend_mode"), StaticEnum<EBlendMode>()->GetNameStringByValue((int64)BaseMat->BlendMode));
+		Info->SetStringField(TEXT("shading_model"), BaseMat->GetShadingModels().GetFirstShadingModel() == MSM_Unlit ? TEXT("Unlit") : TEXT("Lit"));
+		Info->SetBoolField(TEXT("two_sided"), BaseMat->TwoSided);
+
+		// Get expressions (nodes)
+		TArray<TSharedPtr<FJsonValue>> ExpressionsArray;
+		TArray<TSharedPtr<FJsonValue>> ParametersArray;
+		TArray<TSharedPtr<FJsonValue>> CustomNodesArray;
+
+		for (UMaterialExpression* Expr : BaseMat->GetExpressions())
+		{
+			TSharedPtr<FJsonObject> ExprObj = MakeShared<FJsonObject>();
+			ExprObj->SetStringField(TEXT("type"), Expr->GetClass()->GetName());
+			ExprObj->SetStringField(TEXT("desc"), Expr->GetDescription());
+
+			// Check for scalar parameter
+			if (UMaterialExpressionScalarParameter* ScalarParam = Cast<UMaterialExpressionScalarParameter>(Expr))
+			{
+				TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
+				ParamObj->SetStringField(TEXT("name"), ScalarParam->ParameterName.ToString());
+				ParamObj->SetStringField(TEXT("type"), TEXT("scalar"));
+				ParamObj->SetNumberField(TEXT("default"), ScalarParam->DefaultValue);
+				ParametersArray.Add(MakeShared<FJsonValueObject>(ParamObj));
+			}
+			// Check for vector parameter
+			else if (UMaterialExpressionVectorParameter* VectorParam = Cast<UMaterialExpressionVectorParameter>(Expr))
+			{
+				TSharedPtr<FJsonObject> ParamObj = MakeShared<FJsonObject>();
+				ParamObj->SetStringField(TEXT("name"), VectorParam->ParameterName.ToString());
+				ParamObj->SetStringField(TEXT("type"), TEXT("vector"));
+				TSharedPtr<FJsonObject> DefVal = MakeShared<FJsonObject>();
+				DefVal->SetNumberField(TEXT("r"), VectorParam->DefaultValue.R);
+				DefVal->SetNumberField(TEXT("g"), VectorParam->DefaultValue.G);
+				DefVal->SetNumberField(TEXT("b"), VectorParam->DefaultValue.B);
+				DefVal->SetNumberField(TEXT("a"), VectorParam->DefaultValue.A);
+				ParamObj->SetObjectField(TEXT("default"), DefVal);
+				ParametersArray.Add(MakeShared<FJsonValueObject>(ParamObj));
+			}
+			// Check for Custom node
+			else if (UMaterialExpressionCustom* CustomNode = Cast<UMaterialExpressionCustom>(Expr))
+			{
+				TSharedPtr<FJsonObject> CustomObj = MakeShared<FJsonObject>();
+				CustomObj->SetStringField(TEXT("description"), CustomNode->Description);
+				CustomObj->SetStringField(TEXT("output_type"), StaticEnum<ECustomMaterialOutputType>()->GetNameStringByValue((int64)CustomNode->OutputType));
+				CustomObj->SetNumberField(TEXT("code_length"), CustomNode->Code.Len());
+
+				// List inputs
+				TArray<TSharedPtr<FJsonValue>> InputsArray;
+				for (const FCustomInput& Input : CustomNode->Inputs)
+				{
+					TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+					InputObj->SetStringField(TEXT("name"), Input.InputName.ToString());
+					InputObj->SetBoolField(TEXT("connected"), Input.Input.Expression != nullptr);
+					if (Input.Input.Expression)
+					{
+						InputObj->SetStringField(TEXT("connected_to"), Input.Input.Expression->GetDescription());
+					}
+					InputsArray.Add(MakeShared<FJsonValueObject>(InputObj));
+				}
+				CustomObj->SetArrayField(TEXT("inputs"), InputsArray);
+				CustomNodesArray.Add(MakeShared<FJsonValueObject>(CustomObj));
+			}
+
+			ExpressionsArray.Add(MakeShared<FJsonValueObject>(ExprObj));
+		}
+
+		Info->SetNumberField(TEXT("expression_count"), ExpressionsArray.Num());
+		Info->SetArrayField(TEXT("parameters"), ParametersArray);
+		Info->SetArrayField(TEXT("custom_nodes"), CustomNodesArray);
+
+		// Check what's connected to emissive
+		if (BaseMat->GetEditorOnlyData() && BaseMat->GetEditorOnlyData()->EmissiveColor.Expression)
+		{
+			Info->SetStringField(TEXT("emissive_connected_to"), BaseMat->GetEditorOnlyData()->EmissiveColor.Expression->GetDescription());
+		}
+		else
+		{
+			Info->SetStringField(TEXT("emissive_connected_to"), TEXT("None"));
+		}
 	}
 	else
 	{
