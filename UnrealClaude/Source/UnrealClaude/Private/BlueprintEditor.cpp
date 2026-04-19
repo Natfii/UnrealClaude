@@ -492,7 +492,15 @@ FString FBlueprintEditor::PinTypeToString(const FEdGraphPinType& PinType)
 	}
 	else if (PinType.PinCategory == UEdGraphSchema_K2::PC_Byte)
 	{
-		TypeName = TEXT("byte");
+		// FByteProperty with a non-null Enum pointer means a UENUM variable; prefer enum name over "byte"
+		if (UEnum* Enum = Cast<UEnum>(PinType.PinSubCategoryObject.Get()))
+		{
+			TypeName = Enum->GetName();
+		}
+		else
+		{
+			TypeName = TEXT("byte");
+		}
 	}
 	else if (PinType.PinCategory == UEdGraphSchema_K2::PC_String)
 	{
