@@ -28,6 +28,10 @@
 #include "Tools/MCPTool_Character.h"
 #include "Tools/MCPTool_CharacterData.h"
 #include "Tools/MCPTool_Material.h"
+#include "Tools/MCPTool_MaterialCreate.h"
+#include "Tools/MCPTool_MaterialPreview.h"
+#include "Tools/MCPTool_LiveCoding.h"
+#include "Tools/MCPTool_EditorExit.h"
 #include "Tools/MCPTool_Asset.h"
 #include "Tools/MCPTool_OpenLevel.h"
 
@@ -105,10 +109,18 @@ void FMCPToolRegistry::RegisterBuiltinTools()
 
 	// Material and Asset tools
 	RegisterTool(MakeShared<FMCPTool_Material>());
+	RegisterTool(MakeShared<FMCPTool_MaterialCreate>());
+	RegisterTool(MakeShared<FMCPTool_MaterialPreview>());
 	RegisterTool(MakeShared<FMCPTool_Asset>());
 
 	// Level management tools
 	RegisterTool(MakeShared<FMCPTool_OpenLevel>());
+
+	// Build tools
+	RegisterTool(MakeShared<FMCPTool_LiveCoding>());
+
+	// Editor control
+	RegisterTool(MakeShared<FMCPTool_EditorExit>());
 
 	// Create and register async task queue tools
 	// Task queue takes a raw pointer since the registry always outlives it
