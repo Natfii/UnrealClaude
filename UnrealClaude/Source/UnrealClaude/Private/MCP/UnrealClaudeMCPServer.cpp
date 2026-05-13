@@ -247,9 +247,12 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 
 	FMCPToolResult Result = ToolRegistry->ExecuteTool(ToolName, ParamsJson.ToSharedRef());
 
-	// Build response
+	// Build response. `isError` is the canonical MCP field
+	// (https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling);
+	// `success` is retained for the legacy bridge contract.
 	TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
 	ResponseJson->SetBoolField(TEXT("success"), Result.bSuccess);
+	ResponseJson->SetBoolField(TEXT("isError"), !Result.bSuccess);
 	ResponseJson->SetStringField(TEXT("message"), Result.Message);
 
 	if (Result.Data.IsValid())
@@ -328,6 +331,10 @@ TUniquePtr<FHttpServerResponse> FUnrealClaudeMCPServer::CreateErrorResponse(cons
 {
 	TSharedPtr<FJsonObject> ErrorJson = MakeShared<FJsonObject>();
 	ErrorJson->SetBoolField(TEXT("success"), false);
+	ErrorJson->SetBoolField(TEXT("isError"), true);
+	ErrorJson->SetStringField(TEXT("message"), Message);
+	// `error` is kept as a deprecation grace period for any direct HTTP consumer
+	// that was reading the old field name. The bridge has always read `message`.
 	ErrorJson->SetStringField(TEXT("error"), Message);
 
 	FString JsonString;
