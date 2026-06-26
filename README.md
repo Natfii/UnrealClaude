@@ -247,6 +247,10 @@ UnrealClaude automatically gathers information about your project:
 
 <img width="707" height="542" alt="{AB6AC101-4A4C-4607-BFB6-187D49F5E65B}" src="https://github.com/user-attachments/assets/e0c2e398-8fcd-4ac6-ade7-d50870215ec1" />
 
+Claude can write, compile (C++ via Live Coding), and run Python / Console / Editor Utility scripts — each gated by a **permission dialog** (deny-by-default; see *Auto-approve script execution* under [Configuration](#configuration)).
+
+> **Note — scripting & console tools are hidden by default.** The MCP bridge does **not** advertise `execute_script`, `run_console_command`, `cleanup_scripts`, or `get_script_history` to the model. They're a deliberate power-user fallback, kept off in releases so the model uses the structured editor tools (and to keep the tool list small). They remain *callable by exact name*, and every execution still passes through the C++ permission dialog. To surface them to the model, move the names out of `HIDDEN_TOOL_NAMES` in `Resources/mcp-bridge/tool-router.js`. **`run_console_command` can reach the Python interpreter (`py …`) — treat un-hiding it as enabling arbitrary code execution; keep it to trusted setups only.**
+
 ### MCP Server
 
 The plugin includes a Model Context Protocol (MCP) server with 20+ tools that expose editor functionality to Claude and external tools. The MCP server runs on port 3000 by default and starts automatically when the editor loads.

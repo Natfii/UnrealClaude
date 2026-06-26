@@ -38,6 +38,13 @@ const TArray<FString>& FMCPParamValidator::GetBlockedConsoleCommands()
 
 		TEXT("gc."),
 		TEXT("r."),  // Block all rendering CVars as they can crash
+
+		// Script/interpreter escapes. `py` prefix-matches both `py <stmt>` and `python` — the
+		// Python Editor Script Plugin registers `py`, so an un-gated console `py` is arbitrary
+		// Python -> OS execution. keybind/setbind defer an arbitrary command to a keypress.
+		TEXT("py"),
+		TEXT("keybind"),
+		TEXT("setbind"),
 	};
 
 	return BlockedCommands;
