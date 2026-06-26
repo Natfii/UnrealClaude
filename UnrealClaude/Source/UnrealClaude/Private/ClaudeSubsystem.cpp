@@ -101,6 +101,11 @@ void FClaudeCodeSubsystem::SendPrompt(
 
 	Config.AttachedImagePaths = Options.AttachedImagePaths;
 
+	// Prompt caching order: static blocks first (highest TTL hit rate), dynamic last.
+	// 1. CachedUE57SystemPrompt — fully static, compiles to a constant string
+	// 2. GetProjectContextPrompt — lightweight 1-line summary (stable between calls)
+	// 3. CustomSystemPrompt (CLAUDE.md) — user-controlled, treat as stable
+	// Conversation history and the user prompt are always appended last (dynamic, not cached).
 	if (Options.bIncludeEngineContext)
 	{
 		Config.SystemPrompt = GetUE57SystemPrompt();
@@ -154,7 +159,18 @@ FString FClaudeCodeSubsystem::GetUE57SystemPrompt() const
 
 FString FClaudeCodeSubsystem::GetProjectContextPrompt() const
 {
-	FString Context = FProjectContextManager::Get().FormatContextForPrompt();
+	// Lightweight one-liner summary only — keeps this block stable for prompt caching.
+	// Full class list, source tree, and level actors are available via unreal_get_project_context.
+	const FString Summary = FProjectContextManager::Get().GetContextSummary();
+
+	FString Context;
+	if (!Summary.IsEmpty())
+	{
+		Context = TEXT("\n\n=== PROJECT CONTEXT ===\n");
+		Context += Summary + TEXT("\n");
+		Context += TEXT("Call unreal_get_project_context for the full class list, source tree, and level actors.\n");
+		Context += TEXT("=== END PROJECT CONTEXT ===\n");
+	}
 
 	FString ScriptHistory = FScriptExecutionManager::Get().FormatHistoryForContext(10);
 	if (!ScriptHistory.IsEmpty())

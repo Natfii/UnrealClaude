@@ -47,6 +47,9 @@ private:
 	/** Handle GET /mcp/status - Get server status */
 	bool HandleStatus(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
 
+	/** Handle GET /mcp/project_context - Return full project context (classes, source, actors) */
+	bool HandleProjectContext(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
+
 	/** Helper to create JSON response */
 	TUniquePtr<FHttpServerResponse> CreateJsonResponse(const FString& JsonContent, EHttpServerResponseCodes Code = EHttpServerResponseCodes::Ok);
 
@@ -61,6 +64,7 @@ private:
 	FHttpRouteHandle ListToolsHandle;
 	FHttpRouteHandle ExecuteToolHandle;
 	FHttpRouteHandle StatusHandle;
+	FHttpRouteHandle ProjectContextHandle;
 
 	/** Tool registry */
 	TSharedPtr<FMCPToolRegistry> ToolRegistry;

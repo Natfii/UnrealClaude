@@ -5,6 +5,7 @@
 #include "MCPResponseFormatter.h"
 #include "UnrealClaudeModule.h"
 #include "UnrealClaudeConstants.h"
+#include "ProjectContext.h"
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
 #include "HttpServerRequest.h"
@@ -90,6 +91,10 @@ void FUnrealClaudeMCPServer::Stop()
 		{
 			HttpRouter->UnbindRoute(StatusHandle);
 		}
+		if (ProjectContextHandle.IsValid())
+		{
+			HttpRouter->UnbindRoute(ProjectContextHandle);
+		}
 	}
 
 	bIsRunning = false;
@@ -119,6 +124,12 @@ void FUnrealClaudeMCPServer::SetupRoutes()
 		FHttpPath(TEXT("/mcp/status")),
 		EHttpServerRequestVerbs::VERB_GET,
 		FHttpRequestHandler::CreateRaw(this, &FUnrealClaudeMCPServer::HandleStatus)
+	);
+
+	ProjectContextHandle = HttpRouter->BindRoute(
+		FHttpPath(TEXT("/mcp/project_context")),
+		EHttpServerRequestVerbs::VERB_GET,
+		FHttpRequestHandler::CreateRaw(this, &FUnrealClaudeMCPServer::HandleProjectContext)
 	);
 }
 
@@ -268,6 +279,26 @@ bool FUnrealClaudeMCPServer::HandleStatus(const FHttpServerRequest& Request, con
 
 	ResponseJson->SetStringField(TEXT("projectName"), FApp::GetProjectName());
 	ResponseJson->SetStringField(TEXT("engineVersion"), FEngineVersion::Current().ToString());
+
+	FString JsonString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+	FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
+
+	OnComplete(CreateJsonResponse(JsonString));
+	return true;
+}
+
+bool FUnrealClaudeMCPServer::HandleProjectContext(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+{
+	FProjectContextManager& ContextMgr = FProjectContextManager::Get();
+	ContextMgr.GetContext(); // ensure fresh context is available
+
+	const FString ContextText = ContextMgr.FormatContextForPrompt();
+
+	TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
+	ResponseJson->SetStringField(TEXT("context"), ContextText);
+	ResponseJson->SetStringField(TEXT("summary"), ContextMgr.GetContextSummary());
+	ResponseJson->SetBoolField(TEXT("success"), true);
 
 	FString JsonString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
