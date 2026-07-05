@@ -927,7 +927,7 @@ TSharedPtr<FJsonObject> FAnimationBlueprintUtils::ExecuteBatchOperations(
 				{
 					for (const auto& Pair : (*BindingsObj)->Values)
 					{
-						Bindings.Add(Pair.Key, Pair.Value->AsString());
+						Bindings.Add(FString(Pair.Key.ToView()), Pair.Value->AsString());
 					}
 				}
 				bOpSuccess = SetStateBlendSpace(
