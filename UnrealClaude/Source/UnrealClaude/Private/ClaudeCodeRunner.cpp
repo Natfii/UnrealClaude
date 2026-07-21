@@ -1437,21 +1437,29 @@ void FClaudeCodeRunner::ExecuteProcess()
 		// Cache the stdin payload for the silence watchdog diagnostic.
 		LastStdinPayload = StdinPayload;
 
-		if (!StdinPayload.IsEmpty())
-		{
-			FTCHARToUTF8 Utf8Payload(*StdinPayload);
-			int32 BytesWritten = 0;
-			bool bWritten = FPlatformProcess::WritePipe(StdInWritePipe, (const uint8*)Utf8Payload.Get(), Utf8Payload.Length(), &BytesWritten);
-			UE_LOG(LogUnrealClaude, Log, TEXT("Wrote to Claude stdin (stream-json, success=%d, %d/%d bytes, images: %d, system: %d chars, user: %d chars)"),
-				bWritten, BytesWritten, Utf8Payload.Length(), CurrentConfig.AttachedImagePaths.Num(),
-				CurrentConfig.SystemPrompt.Len(), CurrentConfig.Prompt.Len());
-		}
-
-		// Close stdin write pipe to signal EOF to Claude
-		// We close the entire stdin pipe pair since child has the read end
-		FPlatformProcess::ClosePipe(StdInReadPipe, StdInWritePipe);
-		StdInReadPipe = nullptr;
+		// Write on a background thread
+		void* WriteHandle = StdInWritePipe;
+		void* ReadHandleForChild = StdInReadPipe;
 		StdInWritePipe = nullptr;
+		StdInReadPipe = nullptr;
+
+		Async(EAsyncExecution::Thread, [WriteHandle, ReadHandleForChild, StdinPayload, ImageCount = CurrentConfig.AttachedImagePaths.Num()]()
+		{
+			if (!StdinPayload.IsEmpty())
+			{
+				FTCHARToUTF8 Utf8Payload(*StdinPayload);
+				int32 BytesWritten = 0;
+				bool bWritten = FPlatformProcess::WritePipe(WriteHandle, (const uint8*)Utf8Payload.Get(), Utf8Payload.Length(), &BytesWritten);
+				UE_LOG(LogUnrealClaude, Log, TEXT("Wrote to Claude stdin (stream-json, success=%d, %d/%d bytes, images: %d)"),
+					bWritten, BytesWritten, Utf8Payload.Length(), ImageCount);
+			}
+
+			// Close stdin write pipe to signal EOF to Claude
+			// We close the entire stdin pipe pair since child has the read end
+			void* ReadCopy = ReadHandleForChild;
+			void* WriteCopy = WriteHandle;
+			FPlatformProcess::ClosePipe(ReadCopy, WriteCopy);
+		});
 	}
 
 	SystemPromptFilePath.Empty();
