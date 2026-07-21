@@ -24,6 +24,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Framework/Application/SlateApplication.h"
@@ -152,11 +153,27 @@ void SChatMessage::Construct(const FArguments& InArgs)
 	}
 	else
 	{
-		ContentWidget = SNew(STextBlock)
-			.Text(FText::FromString(Message))
-			.TextStyle(FAppStyle::Get(), "NormalText")
-			.ColorAndOpacity(FSlateColor(TextColor))
-			.AutoWrapText(true);
+		// Allow selecting user messages in Plain Text mode
+		ContentWidget = SNew(SWidgetSwitcher)
+			.WidgetIndex_Lambda([this]() { return bSelectionModeAttr.Get() ? 1 : 0; })
+
+			+ SWidgetSwitcher::Slot()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Message))
+				.TextStyle(FAppStyle::Get(), "NormalText")
+				.ColorAndOpacity(FSlateColor(TextColor))
+				.AutoWrapText(true)
+			]
+
+			+ SWidgetSwitcher::Slot()
+			[
+				SNew(SMultiLineEditableText)
+				.Text(FText::FromString(Message))
+				.TextStyle(FAppStyle::Get(), "NormalText")
+				.AutoWrapText(true)
+				.IsReadOnly(true)
+			];
 	}
 
 	ChildSlot
@@ -481,7 +498,7 @@ void SClaudeEditorWidget::AddMessage(const FString& Message, bool bIsUser)
 			.Message(Message)
 			.IsUser(bIsUser)
 			.bRenderMarkdown(!bIsUser)  // Enable Markdown rendering for Claude messages
-			.bSelectionMode_Lambda([this, bIsUser]() { return bSelectionMode && !bIsUser; })  // Dynamic: only for Claude messages
+			.bSelectionMode_Lambda([this]() { return bSelectionMode; })  // Dynamic: applies to both user and Claude messages
 		];
 
 		// Only scroll to bottom if we were already there
