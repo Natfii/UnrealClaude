@@ -398,7 +398,7 @@ FMCPToolResult FMCPTool_BlueprintModify::ExecuteAddNode(const TSharedRef<FJsonOb
 				if (PinValue.Value->TryGetString(PinValueStr))
 				{
 					FString PinError;
-					FBlueprintUtils::SetPinDefaultValue(Graph, NodeId, PinValue.Key, PinValueStr, PinError);
+					FBlueprintUtils::SetPinDefaultValue(Graph, NodeId, FString(*PinValue.Key), PinValueStr, PinError);
 				}
 			}
 		}
@@ -545,7 +545,7 @@ bool FMCPTool_BlueprintModify::CreateNodesFromSpec(
 				if (PinValue.Value->TryGetString(PinValueStr))
 				{
 					FString PinError;
-					FBlueprintUtils::SetPinDefaultValue(Graph, NodeId, PinValue.Key, PinValueStr, PinError);
+					FBlueprintUtils::SetPinDefaultValue(Graph, NodeId, FString(*PinValue.Key), PinValueStr, PinError);
 				}
 			}
 		}
