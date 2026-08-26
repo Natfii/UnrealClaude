@@ -376,7 +376,7 @@ bool FMCPTool_SetProperty::SetStructPropertyValue(FStructProperty* StructProp, v
 		for (const auto& Pair : (*ObjVal)->Values)
 		{
 			if (!bFirst) TextRepresentation += TEXT(",");
-			TextRepresentation += Pair.Key.ToUpper() + TEXT("=");
+			TextRepresentation += FString(*Pair.Key).ToUpper() + TEXT("=");
 
 			double NumVal;
 			FString StrVal;

@@ -775,7 +775,7 @@ FMCPToolResult FMCPTool_AnimBlueprintModify::HandleSetStateAnimation(const FStri
 		{
 			for (const auto& Pair : (*BindingsObj)->Values)
 			{
-				Bindings.Add(Pair.Key, Pair.Value->AsString());
+				Bindings.Add(FString(*Pair.Key), Pair.Value->AsString());
 			}
 		}
 		bSuccess = FAnimationBlueprintUtils::SetStateBlendSpace(
