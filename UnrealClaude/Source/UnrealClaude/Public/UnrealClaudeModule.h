@@ -27,7 +27,7 @@ public:
 	TSharedPtr<FUnrealClaudeMCPServer> GetMCPServer() const { return MCPServer; }
 
 	/** Get MCP server port - uses centralized constant */
-	static constexpr uint32 GetMCPServerPort() { return UnrealClaudeConstants::MCPServer::DefaultPort; }
+	static uint32 GetMCPServerPort();
 
 private:
 	void RegisterMenus();

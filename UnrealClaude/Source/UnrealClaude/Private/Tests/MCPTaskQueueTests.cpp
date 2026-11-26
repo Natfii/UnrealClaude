@@ -280,6 +280,38 @@ bool FMCPTaskQueue_CancelPendingTask::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTaskQueue_ShutdownCancelsPendingTasks,
+	"UnrealClaude.MCP.TaskQueue.ShutdownCancelsPendingTasks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTaskQueue_ShutdownCancelsPendingTasks::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	TSharedPtr<FMCPTaskQueue> Queue = Registry.GetTaskQueue();
+
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	FGuid TaskId = Queue->SubmitTask(TEXT("get_level_actors"), Params);
+
+	TestTrue("Task should be submitted before shutdown", TaskId.IsValid());
+
+	Queue->Shutdown();
+
+	TSharedPtr<FMCPAsyncTask> Task = Queue->GetTask(TaskId);
+	TestNotNull("Task should remain available after shutdown", Task.Get());
+	if (Task.IsValid())
+	{
+		TestEqual("Pending task should be cancelled during shutdown", Task->Status.Load(), EMCPTaskStatus::Cancelled);
+		TestTrue("Cancelled shutdown task should be complete", Task->IsComplete());
+	}
+
+	FGuid RejectedTaskId = Queue->SubmitTask(TEXT("get_level_actors"), Params);
+	TestFalse("New task submission should be rejected after shutdown", RejectedTaskId.IsValid());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FMCPTaskQueue_CancelNonExistentTask,
 	"UnrealClaude.MCP.TaskQueue.CancelNonExistentTask",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter

@@ -12,6 +12,8 @@
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/PlatformProcess.h"
+#include "Async/TaskGraphInterfaces.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -250,14 +252,25 @@ bool FScriptExecutionManager::TriggerLiveCodingCompile(FString& OutErrorLog)
 
 	LiveCoding->Compile(ELiveCodingCompileFlags::None, nullptr);
 
-	// LiveCoding compiles asynchronously; poll IsCompiling until done or timeout
+	// LiveCoding compiles asynchronously. Never block the game thread with long Sleep()
+	// calls — that freezes the editor for up to 60s. On the game thread, pump the
+	// task graph between short waits; off the game thread, sleep normally.
 	float WaitTime = 0.0f;
 	const float MaxWait = 60.0f;
-	const float PollInterval = 0.5f;
+	const bool bOnGameThread = IsInGameThread();
+	const float PollInterval = bOnGameThread ? 0.05f : 0.25f;
 
 	while (LiveCoding->IsCompiling() && WaitTime < MaxWait)
 	{
-		FPlatformProcess::Sleep(PollInterval);
+		if (bOnGameThread)
+		{
+			FPlatformProcess::Sleep(PollInterval);
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		}
+		else
+		{
+			FPlatformProcess::Sleep(PollInterval);
+		}
 		WaitTime += PollInterval;
 	}
 

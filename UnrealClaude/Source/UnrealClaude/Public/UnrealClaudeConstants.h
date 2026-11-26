@@ -4,6 +4,22 @@
 
 #include "CoreMinimal.h"
 
+// Phase 10: Central place for engine version targeting.
+// Current support is Unreal Engine 5.7 only. No functional changes yet.
+// When adding support for other versions, gate 5.7-specific APIs with this macro.
+#ifndef UNREALCLAUDE_ENGINE_VERSION_MAJOR
+#define UNREALCLAUDE_ENGINE_VERSION_MAJOR 5
+#endif
+#ifndef UNREALCLAUDE_ENGINE_VERSION_MINOR
+#define UNREALCLAUDE_ENGINE_VERSION_MINOR 7
+#endif
+
+#if ENGINE_MAJOR_VERSION != UNREALCLAUDE_ENGINE_VERSION_MAJOR || ENGINE_MINOR_VERSION != UNREALCLAUDE_ENGINE_VERSION_MINOR
+	// Hard fail at compile time so unsupported engine versions are not silently built.
+	static_assert(false, "UnrealClaude is validated for Unreal Engine 5.7 only. Other versions require explicit API adjustments.");
+#endif
+
+
 /**
  * Constants used throughout the UnrealClaude plugin
  * Centralizes magic numbers and configuration values
@@ -20,6 +36,49 @@ namespace UnrealClaudeConstants
 
 		/** Default timeout in seconds for Claude CLI execution */
 		constexpr float DefaultTimeoutSeconds = 300.0f;
+
+		/**
+		 * Hard cap on accumulated Claude process stdout (NDJSON stream).
+		 * Prevents unbounded memory growth if the CLI emits excessively.
+		 * 32 MiB is well above normal tool-use transcripts.
+		 */
+		constexpr int32 MaxProcessOutputBytes = 32 * 1024 * 1024;
+	}
+
+	/**
+	 * Tools that must not be advertised to the model (power-user / infrastructure).
+	 * Single source of truth for C++. The MCP bridge mirrors this list in
+	 * Resources/mcp-bridge/tool-router.js (HIDDEN_TOOL_NAMES) — keep them in sync.
+	 */
+	namespace HiddenTools
+	{
+		inline bool IsHidden(const FString& ToolName)
+		{
+			static const TSet<FString> Names = {
+				TEXT("task_submit"),
+				TEXT("task_status"),
+				TEXT("task_result"),
+				TEXT("task_list"),
+				TEXT("task_cancel"),
+				TEXT("execute_script"),
+				TEXT("cleanup_scripts"),
+				TEXT("get_script_history"),
+				TEXT("run_console_command"),
+			};
+			return Names.Contains(ToolName);
+		}
+
+		/** Subset blocked from task_submit so it cannot bypass the hide policy. */
+		inline bool IsBlockedFromTaskSubmit(const FString& ToolName)
+		{
+			static const TSet<FString> Names = {
+				TEXT("execute_script"),
+				TEXT("run_console_command"),
+				TEXT("cleanup_scripts"),
+				TEXT("get_script_history"),
+			};
+			return Names.Contains(ToolName);
+		}
 	}
 
 	namespace UI
@@ -55,13 +114,13 @@ namespace UnrealClaudeConstants
 		constexpr int32 MaxUClassSearchLimit = 500;
 
 		/** Maximum classes to format in context output */
-		constexpr int32 MaxClassesToFormat = 30;
+		constexpr int32 MaxClassesToFormat = 20;  // Phase 6: smaller default full context
 
 		/** Maximum directories to show in context output */
-		constexpr int32 MaxDirectoriesToShow = 10;
+		constexpr int32 MaxDirectoriesToShow = 6;  // Phase 6: smaller default full context
 
 		/** Maximum asset types to show in context output */
-		constexpr int32 MaxAssetTypesToShow = 15;
+		constexpr int32 MaxAssetTypesToShow = 8;  // Phase 6: smaller default full context
 
 		/** Maximum distance (in characters) to search for 'class' keyword after UCLASS macro */
 		constexpr int32 MaxUClassToClassKeywordDistance = 500;
@@ -157,6 +216,16 @@ namespace UnrealClaudeConstants
 
 		/** Maximum HTTP request body size in bytes (1 MB) */
 		constexpr int32 MaxRequestBodySize = 1024 * 1024;
+
+		/** Maximum serialized MCP tool response size in bytes (4 MB) */
+		constexpr int32 MaxResponseSize = 4 * 1024 * 1024;
+
+		/** Maximum output-log content returned by get_output_log (512 KiB) */
+		constexpr int32 MaxOutputLogContentSize = 512 * 1024;
+
+		/** Maximum viewport pixels read into memory before downscaling */
+		constexpr int64 MaxViewportPixels = 4LL * 1024LL * 1024LL;
+
 
 		/** Expected MCP tools that should be registered at startup */
 		inline const TArray<FString> ExpectedTools = {

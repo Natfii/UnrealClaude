@@ -46,7 +46,7 @@ This opens a browser window to sign in with your Claude account. Once authentica
 
 ### Prebuilt (recommended)
 
-1. Download `UnrealClaude-Mac-v1.2.2.zip` from the [Releases page](https://github.com/lateralsummer/UnrealClaudeMac/releases)
+1. Download `UnrealClaude-Mac-v1.2.2.zip` from the [Releases page](https://github.com/Natfii/UnrealClaude/releases)
 2. Unzip it — you should see a folder called `UnrealClaude`
 3. Copy the `UnrealClaude` folder into your project's `Plugins` directory:
 
@@ -71,8 +71,8 @@ npm install
 
 ```bash
 # Clone the repo (includes the MCP bridge submodule)
-git clone --recurse-submodules https://github.com/lateralsummer/UnrealClaudeMac.git
-cd UnrealClaudeMac
+git clone --recurse-submodules https://github.com/Natfii/UnrealClaude.git
+cd UnrealClaude
 
 # Install MCP bridge dependencies
 cd UnrealClaude/Resources/mcp-bridge
@@ -83,7 +83,7 @@ cd ../../..
 /Users/Shared/Epic\ Games/UE_5.7/Engine/Build/BatchFiles/RunUAT.sh BuildPlugin \
   -Plugin="$(pwd)/UnrealClaude/UnrealClaude.uplugin" \
   -Package="$(pwd)/BuiltPlugin" \
-  -TargetPlatforms=Mac -Rocket
+  -TargetPlatforms=Mac
 
 # Copy to your project
 cp -R BuiltPlugin YourProject/Plugins/UnrealClaude

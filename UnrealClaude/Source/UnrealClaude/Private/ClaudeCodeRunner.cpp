@@ -87,6 +87,7 @@ FString FClaudeCodeRunner::GetClaudePath()
 	bHasSearched = true;
 
 	TArray<FString> PossiblePaths;
+	TArray<FString> CheckedPaths; // For better logging when nothing is found
 
 #if PLATFORM_WINDOWS
 	// User profile .local/bin (Claude Code native installer location)
@@ -96,21 +97,23 @@ FString FClaudeCodeRunner::GetClaudePath()
 		PossiblePaths.Add(FPaths::Combine(UserProfile, TEXT(".local"), TEXT("bin"), TEXT("claude.exe")));
 	}
 
-	// npm global install location
+	// npm global install locations
 	FString AppData = FPlatformMisc::GetEnvironmentVariable(TEXT("APPDATA"));
 	if (!AppData.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(AppData, TEXT("npm"), TEXT("claude.cmd")));
 	}
 
-	// Local AppData npm
 	FString LocalAppData = FPlatformMisc::GetEnvironmentVariable(TEXT("LOCALAPPDATA"));
 	if (!LocalAppData.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(LocalAppData, TEXT("npm"), TEXT("claude.cmd")));
+		// Common yarn / pnpm global locations on Windows
+		PossiblePaths.Add(FPaths::Combine(LocalAppData, TEXT("Yarn"), TEXT("bin"), TEXT("claude.cmd")));
+		PossiblePaths.Add(FPaths::Combine(LocalAppData, TEXT("pnpm"), TEXT("claude.cmd")));
 	}
 
-	// User profile npm
+	// User profile npm (another common spot)
 	if (!UserProfile.IsEmpty())
 	{
 		PossiblePaths.Add(FPaths::Combine(UserProfile, TEXT("AppData"), TEXT("Roaming"), TEXT("npm"), TEXT("claude.cmd")));
@@ -123,29 +126,32 @@ FString FClaudeCodeRunner::GetClaudePath()
 
 	for (const FString& Dir : PathDirs)
 	{
-		PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude.cmd")));
-		PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude.exe")));
+		if (!Dir.IsEmpty())
+		{
+			PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude.cmd")));
+			PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude.exe")));
+		}
 	}
 #else
-	// Linux/Mac: Claude Code native installer location
+	// Linux / macOS
 	FString Home = FPlatformMisc::GetEnvironmentVariable(TEXT("HOME"));
 	if (!Home.IsEmpty())
 	{
+		// Native installer location
 		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".local"), TEXT("bin"), TEXT("claude")));
+		// Common npm global prefix
+		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".npm-global"), TEXT("bin"), TEXT("claude")));
+		// Yarn global
+		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".yarn"), TEXT("bin"), TEXT("claude")));
+		// pnpm global
+		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".local"), TEXT("share"), TEXT("pnpm"), TEXT("claude")));
 	}
 
-	// Common system paths
+	// Common system and package manager paths
 	PossiblePaths.Add(TEXT("/usr/local/bin/claude"));
 	PossiblePaths.Add(TEXT("/usr/bin/claude"));
-
-	// npm global install locations
-	if (!Home.IsEmpty())
-	{
-		// npm default global prefix on Linux
-		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".npm-global"), TEXT("bin"), TEXT("claude")));
-		// nvm-managed node
-		PossiblePaths.Add(FPaths::Combine(Home, TEXT(".nvm"), TEXT("versions"), TEXT("node")));
-	}
+	// Homebrew on Apple Silicon
+	PossiblePaths.Add(TEXT("/opt/homebrew/bin/claude"));
 
 	// Scan every PATH directory as a last resort
 	FString PathEnv = FPlatformMisc::GetEnvironmentVariable(TEXT("PATH"));
@@ -154,12 +160,17 @@ FString FClaudeCodeRunner::GetClaudePath()
 
 	for (const FString& Dir : PathDirs)
 	{
-		PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude")));
+		if (!Dir.IsEmpty())
+		{
+			PossiblePaths.Add(FPaths::Combine(Dir, TEXT("claude")));
+		}
 	}
 #endif
 
+	// Check all the paths we collected
 	for (const FString& Path : PossiblePaths)
 	{
+		CheckedPaths.Add(Path);
 		if (IFileManager::Get().FileExists(*Path))
 		{
 			UE_LOG(LogUnrealClaude, Log, TEXT("Found Claude CLI at: %s"), *Path);
@@ -168,7 +179,7 @@ FString FClaudeCodeRunner::GetClaudePath()
 		}
 	}
 
-	// Try using 'where' (Windows) or 'which' (Linux/Mac) as fallback
+	// Fallback: use where (Windows) or which (Linux/macOS)
 	FString WhereOutput;
 	FString WhereErrors;
 	int32 ReturnCode;
@@ -177,7 +188,6 @@ FString FClaudeCodeRunner::GetClaudePath()
 	const TCHAR* WhichCmd = TEXT("where");
 	const TCHAR* WhichArgs = TEXT("claude");
 #else
-	// Route through /bin/sh for PATH resolution (consistent with clipboard handling)
 	const TCHAR* WhichCmd = TEXT("/bin/sh");
 	const TCHAR* WhichArgs = TEXT("-c 'which claude 2>/dev/null'");
 #endif
@@ -187,15 +197,28 @@ FString FClaudeCodeRunner::GetClaudePath()
 		WhereOutput.TrimStartAndEndInline();
 		TArray<FString> Lines;
 		WhereOutput.ParseIntoArrayLines(Lines);
-		if (Lines.Num() > 0)
+
+		for (const FString& Line : Lines)
 		{
-			UE_LOG(LogUnrealClaude, Log, TEXT("Found Claude CLI via '%s': %s"), WhichCmd, *Lines[0]);
-			CachedClaudePath = Lines[0];
-			return CachedClaudePath;
+			FString CleanLine = Line.TrimStartAndEnd();
+			if (!CleanLine.IsEmpty() && IFileManager::Get().FileExists(*CleanLine))
+			{
+				UE_LOG(LogUnrealClaude, Log, TEXT("Found Claude CLI via '%s': %s"), WhichCmd, *CleanLine);
+				CachedClaudePath = CleanLine;
+				return CachedClaudePath;
+			}
 		}
 	}
 
-	UE_LOG(LogUnrealClaude, Warning, TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code"));
+	// Nothing found – log the paths we checked so the user can see what happened
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Claude CLI not found after checking %d locations."), CheckedPaths.Num());
+	for (const FString& Checked : CheckedPaths)
+	{
+		UE_LOG(LogUnrealClaude, Verbose, TEXT("  Checked: %s"), *Checked);
+	}
+
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Install Claude Code with: npm install -g @anthropic-ai/claude-code"));
+	UE_LOG(LogUnrealClaude, Warning, TEXT("Then restart the editor. You can also set the full path in your system PATH if it is installed in a custom location."));
 
 	// CachedClaudePath remains empty if not found
 	return CachedClaudePath;
@@ -217,7 +240,7 @@ bool FClaudeCodeRunner::ExecuteAsync(
 	if (!IsClaudeAvailable())
 	{
 		bIsExecuting = false;
-		OnComplete.ExecuteIfBound(TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code"), false);
+		OnComplete.ExecuteIfBound(TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code then restart the editor."), false);
 		return false;
 	}
 
@@ -248,7 +271,7 @@ bool FClaudeCodeRunner::ExecuteSync(const FClaudeRequestConfig& Config, FString&
 {
 	if (!IsClaudeAvailable())
 	{
-		OutResponse = TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code");
+		OutResponse = TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code then restart the editor.");
 		return false;
 	}
 
@@ -354,11 +377,33 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 			IFileManager::Get().MakeDirectory(*MCPConfigDir, true);
 
 			FString MCPConfigPath = FPaths::Combine(MCPConfigDir, TEXT("mcp-config.json"));
-			FString MCPConfigContent = FString::Printf(
-				TEXT("{\n  \"mcpServers\": {\n    \"unrealclaude\": {\n      \"command\": \"node\",\n      \"args\": [\"%s\"],\n      \"env\": {\n        \"UNREAL_MCP_URL\": \"http://localhost:%d\"\n      }\n    }\n  }\n}"),
-				*MCPBridgePath.Replace(TEXT("\\"), TEXT("/")),
-				UnrealClaudeConstants::MCPServer::DefaultPort
-			);
+			TSharedPtr<FUnrealClaudeMCPServer> MCPServer = FUnrealClaudeModule::Get().GetMCPServer();
+			const FString AuthToken = MCPServer.IsValid() ? MCPServer->GetAuthToken() : FString();
+
+			// Build JSON via FJsonObject so paths containing quotes or backslashes
+			// cannot break the document (unlike FString::Printf).
+			TSharedPtr<FJsonObject> EnvObj = MakeShared<FJsonObject>();
+			EnvObj->SetStringField(TEXT("UNREAL_MCP_URL"),
+				FString::Printf(TEXT("http://localhost:%d"), FUnrealClaudeModule::GetMCPServerPort()));
+			EnvObj->SetStringField(TEXT("UNREAL_MCP_TOKEN"), AuthToken);
+
+			TArray<TSharedPtr<FJsonValue>> ArgsArray;
+			ArgsArray.Add(MakeShared<FJsonValueString>(MCPBridgePath.Replace(TEXT("\\"), TEXT("/"))));
+
+			TSharedPtr<FJsonObject> ServerObj = MakeShared<FJsonObject>();
+			ServerObj->SetStringField(TEXT("command"), TEXT("node"));
+			ServerObj->SetArrayField(TEXT("args"), ArgsArray);
+			ServerObj->SetObjectField(TEXT("env"), EnvObj);
+
+			TSharedPtr<FJsonObject> ServersObj = MakeShared<FJsonObject>();
+			ServersObj->SetObjectField(TEXT("unrealclaude"), ServerObj);
+
+			TSharedPtr<FJsonObject> RootObj = MakeShared<FJsonObject>();
+			RootObj->SetObjectField(TEXT("mcpServers"), ServersObj);
+
+			FString MCPConfigContent;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&MCPConfigContent);
+			FJsonSerializer::Serialize(RootObj.ToSharedRef(), Writer);
 
 			if (FFileHelper::SaveStringToFile(MCPConfigContent, *MCPConfigPath))
 			{
@@ -388,14 +433,16 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 		CommandLine += FString::Printf(TEXT("--allowedTools \"%s\" "), *FString::Join(AllTools, TEXT(",")));
 	}
 
-	// Write prompts to files to avoid command line length limits (Error 206)
-	FString TempDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"));
+	// Write prompts to unique per-request files to avoid races under concurrent sessions.
+	// (Fixed names like prompt.txt / system-prompt.txt would collide.)
+	FString TempDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("requests"));
 	IFileManager::Get().MakeDirectory(*TempDir, true);
+	const FString RequestId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 
 	// System prompt - write to file
 	if (!Config.SystemPrompt.IsEmpty())
 	{
-		FString SystemPromptPath = FPaths::Combine(TempDir, TEXT("system-prompt.txt"));
+		FString SystemPromptPath = FPaths::Combine(TempDir, FString::Printf(TEXT("system-prompt-%s.txt"), *RequestId));
 		if (FFileHelper::SaveStringToFile(Config.SystemPrompt, *SystemPromptPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
 			SystemPromptFilePath = SystemPromptPath;
@@ -404,7 +451,7 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 	}
 
 	// User prompt - write to file
-	FString PromptPath = FPaths::Combine(TempDir, TEXT("prompt.txt"));
+	FString PromptPath = FPaths::Combine(TempDir, FString::Printf(TEXT("prompt-%s.txt"), *RequestId));
 	if (FFileHelper::SaveStringToFile(Config.Prompt, *PromptPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		PromptFilePath = PromptPath;
@@ -455,7 +502,14 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path with traversal: %s"), *FullImagePath);
 			continue;
 		}
-		if (!FullImagePath.StartsWith(ExpectedDir))
+		// Compare directory boundaries, not a raw string prefix.
+		// A sibling such as "screenshots_evil" must not pass this check.
+		FString ExpectedDirWithSeparator = ExpectedDir;
+		if (!ExpectedDirWithSeparator.EndsWith(TEXT("/")) && !ExpectedDirWithSeparator.EndsWith(TEXT("\\")))
+		{
+			ExpectedDirWithSeparator += TEXT("/");
+		}
+		if (!FullImagePath.StartsWith(ExpectedDirWithSeparator, ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogUnrealClaude, Warning, TEXT("Rejecting image path outside screenshots directory: %s"), *FullImagePath);
 			continue;
@@ -1227,10 +1281,14 @@ bool FClaudeCodeRunner::LaunchProcess(const FString& FullCommand, const FString&
 
 	if (!ProcessHandle.IsValid())
 	{
-		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to create Claude process"));
-		UE_LOG(LogUnrealClaude, Error, TEXT("Claude Path: %s"), *ClaudePath);
-		UE_LOG(LogUnrealClaude, Error, TEXT("Params: %s"), *Params);
-		UE_LOG(LogUnrealClaude, Error, TEXT("Working directory: %s"), *WorkingDir);
+		// Process never started, so there is no exit code or stderr yet.
+		// Log everything we have so the user can diagnose (path, full command, working dir).
+		UE_LOG(LogUnrealClaude, Error, TEXT("Failed to start Claude process (CreateProc returned invalid handle)."));
+		UE_LOG(LogUnrealClaude, Error, TEXT("  Claude Path : %s"), *ClaudePath);
+		UE_LOG(LogUnrealClaude, Error, TEXT("  Working Dir : %s"), *WorkingDir);
+		UE_LOG(LogUnrealClaude, Error, TEXT("  Full Command: %s"), *Params);
+		UE_LOG(LogUnrealClaude, Error, TEXT("  Common causes: Claude CLI missing/unexecutable, antivirus blocking the process,"));
+		UE_LOG(LogUnrealClaude, Error, TEXT("                 invalid working directory, or missing system libraries."));
 		return false;
 	}
 
@@ -1246,6 +1304,7 @@ bool FClaudeCodeRunner::LaunchProcess(const FString& FullCommand, const FString&
 FString FClaudeCodeRunner::ReadProcessOutput()
 {
 	FString FullOutput;
+	bool bOutputCapped = false;
 
 	// Reset NDJSON state for this request
 	NdjsonLineBuffer.Empty();
@@ -1258,13 +1317,32 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 		if (!OutputChunk.IsEmpty())
 		{
 			RecordPipeActivity();
-			FullOutput += OutputChunk;
 
-			// NDJSON is line-delimited: buffer chunks until a newline, then split
-			NdjsonLineBuffer += OutputChunk;
+			// Hard byte cap on accumulated stdout to bound memory use
+			const int32 Cap = UnrealClaudeConstants::Process::MaxProcessOutputBytes;
+			if (!bOutputCapped && FullOutput.Len() + OutputChunk.Len() > Cap)
+			{
+				const int32 Remain = FMath::Max(0, Cap - FullOutput.Len());
+				if (Remain > 0)
+				{
+					FullOutput += OutputChunk.Left(Remain);
+				}
+				bOutputCapped = true;
+				UE_LOG(LogUnrealClaude, Warning,
+					TEXT("Claude process output exceeded %d bytes; truncating further reads"), Cap);
+				// Still drain the pipe below so the child does not block on a full pipe,
+				// but stop growing FullOutput / NDJSON buffers.
+			}
+			else if (!bOutputCapped)
+			{
+				FullOutput += OutputChunk;
+
+				// NDJSON is line-delimited: buffer chunks until a newline, then split
+				NdjsonLineBuffer += OutputChunk;
+			}
 
 			int32 NewlineIdx;
-			while (NdjsonLineBuffer.FindChar(TEXT('\n'), NewlineIdx))
+			while (!bOutputCapped && NdjsonLineBuffer.FindChar(TEXT('\n'), NewlineIdx))
 			{
 				FString CompleteLine = NdjsonLineBuffer.Left(NewlineIdx);
 				CompleteLine.TrimEndInline();
@@ -1288,8 +1366,25 @@ FString FClaudeCodeRunner::ReadProcessOutput()
 			while (!RemainingOutput.IsEmpty())
 			{
 				RecordPipeActivity();
-				FullOutput += RemainingOutput;
-				NdjsonLineBuffer += RemainingOutput;
+				if (!bOutputCapped)
+				{
+					const int32 Cap = UnrealClaudeConstants::Process::MaxProcessOutputBytes;
+					if (FullOutput.Len() + RemainingOutput.Len() > Cap)
+					{
+						const int32 Remain = FMath::Max(0, Cap - FullOutput.Len());
+						if (Remain > 0)
+						{
+							FullOutput += RemainingOutput.Left(Remain);
+							NdjsonLineBuffer += RemainingOutput.Left(Remain);
+						}
+						bOutputCapped = true;
+					}
+					else
+					{
+						FullOutput += RemainingOutput;
+						NdjsonLineBuffer += RemainingOutput;
+					}
+				}
 				RemainingOutput = FPlatformProcess::ReadPipe(ReadPipe);
 			}
 
@@ -1361,7 +1456,7 @@ void FClaudeCodeRunner::ExecuteProcess()
 
 	if (ClaudePath.IsEmpty())
 	{
-		ReportError(TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code"));
+		ReportError(TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code then restart the editor."));
 		return;
 	}
 
@@ -1397,14 +1492,19 @@ void FClaudeCodeRunner::ExecuteProcess()
 	{
 		CleanupHandles();
 
+		// Truncate the command for the user message but keep the full version in the log above
+		FString ShortCmd = CommandLine.Len() > 180 ? CommandLine.Left(180) + TEXT("...") : CommandLine;
 		FString ErrorMsg = FString::Printf(
 			TEXT("Failed to start Claude process.\n\n")
 			TEXT("Claude Path: %s\n")
-			TEXT("Working Dir: %s\n\n")
-			TEXT("Command (truncated): %.200s..."),
+			TEXT("Working Dir: %s\n")
+			TEXT("Command: %s\n\n")
+			TEXT("Check the Output Log (LogUnrealClaude) for the full command line.\n")
+			TEXT("Common fixes: reinstall Claude Code (npm install -g @anthropic-ai/claude-code),\n")
+			TEXT("make sure the path is executable, and restart the editor."),
 			*ClaudePath,
 			*WorkingDir,
-			*CommandLine
+			*ShortCmd
 		);
 		ReportError(ErrorMsg);
 		return;
@@ -1454,8 +1554,17 @@ void FClaudeCodeRunner::ExecuteProcess()
 		StdInWritePipe = nullptr;
 	}
 
-	SystemPromptFilePath.Empty();
-	PromptFilePath.Empty();
+	// Delete per-request prompt files now that stdin has been written
+	if (!SystemPromptFilePath.IsEmpty())
+	{
+		IFileManager::Get().Delete(*SystemPromptFilePath);
+		SystemPromptFilePath.Empty();
+	}
+	if (!PromptFilePath.IsEmpty())
+	{
+		IFileManager::Get().Delete(*PromptFilePath);
+		PromptFilePath.Empty();
+	}
 
 	// Read output until process completes (NDJSON events parsed during reading)
 	FString FullOutput = ReadProcessOutput();
@@ -1482,9 +1591,33 @@ void FClaudeCodeRunner::ExecuteProcess()
 	}
 	FPlatformProcess::CloseProc(ProcessHandle);
 
-	// Report completion with parsed response text
 	// A refusal is treated as a failure to prevent the refused exchange from being saved
 	bool bSuccess = (ExitCode == 0) && !StopTaskCounter.GetValue() && !bRefusalDetected.Load();
+
+	if (!bSuccess)
+	{
+		UE_LOG(LogUnrealClaude, Error, TEXT("Claude process finished with failure (exit code %d)."), ExitCode);
+		if (!FullOutput.IsEmpty())
+		{
+			// Log a truncated version of whatever the process wrote (stdout/stderr combined on the pipe)
+			FString LogSnippet = FullOutput.Len() > 1000 ? FullOutput.Left(1000) + TEXT("...") : FullOutput;
+			UE_LOG(LogUnrealClaude, Error, TEXT("Process output:\n%s"), *LogSnippet);
+		}
+		else
+		{
+			UE_LOG(LogUnrealClaude, Error, TEXT("Process produced no output."));
+		}
+
+		// If we have no parsed response, give the user a short diagnostic instead of a blank message
+		if (ResponseText.IsEmpty())
+		{
+			ResponseText = FString::Printf(
+				TEXT("Claude process failed (exit code %d). Check the Output Log (LogUnrealClaude) for details."),
+				ExitCode
+			);
+		}
+	}
+
 	ReportCompletion(ResponseText, bSuccess);
 }
 

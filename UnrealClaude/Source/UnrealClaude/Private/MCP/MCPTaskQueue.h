@@ -110,6 +110,9 @@ private:
 	/** Execute a single task */
 	void ExecuteTask(TSharedPtr<FMCPAsyncTask> Task);
 
+	/** Cancel game-thread ticker callbacks owned by running tasks. */
+	void CancelGameThreadExecutions();
+
 	/** Clean up old completed tasks */
 	void CleanupOldTasks();
 
@@ -133,6 +136,12 @@ private:
 
 	/** Worker thread */
 	FRunnableThread* WorkerThread;
+
+	/** Number of detached background jobs still executing. */
+	TSharedPtr<TAtomic<int32>, ESPMode::ThreadSafe> ActiveAsyncJobs;
+
+	/** Signaled whenever ActiveAsyncJobs reaches zero. */
+	TSharedPtr<FEvent, ESPMode::ThreadSafe> AsyncJobsIdleEvent;
 
 	/** Flag to stop the worker */
 	FThreadSafeBool bShouldStop;

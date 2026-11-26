@@ -13,11 +13,46 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Misc/Guid.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
 
 FUnrealClaudeMCPServer::FUnrealClaudeMCPServer()
 	: bIsRunning(false)
 	, ServerPort(UnrealClaudeConstants::MCPServer::DefaultPort)
 {
+	// Generate a fresh bearer token for every editor session.
+	// Prefer platform secure RNG (UE exposes GetSecureRandomBytes on supported
+	// targets). Fall back to mixed GUID + high-res cycle counter entropy.
+	// Token is never committed and is deleted from disk on Stop().
+	uint8 RandomBytes[32];
+	FMemory::Memzero(RandomBytes, sizeof(RandomBytes));
+	FPlatformMisc::GetSecureRandomBytes(RandomBytes, sizeof(RandomBytes));
+
+	bool bAllZero = true;
+	for (uint8 Byte : RandomBytes)
+	{
+		if (Byte != 0)
+		{
+			bAllZero = false;
+			break;
+		}
+	}
+
+	if (!bAllZero)
+	{
+		AuthToken.Empty(64);
+		for (uint8 Byte : RandomBytes)
+		{
+			AuthToken += FString::Printf(TEXT("%02x"), Byte);
+		}
+	}
+	else
+	{
+		AuthToken = FGuid::NewGuid().ToString(EGuidFormats::Digits)
+			+ FGuid::NewGuid().ToString(EGuidFormats::Digits)
+			+ FString::Printf(TEXT("%016llx"), static_cast<unsigned long long>(FPlatformTime::Cycles64()));
+	}
 	ToolRegistry = MakeShared<FMCPToolRegistry>();
 }
 
@@ -56,7 +91,12 @@ bool FUnrealClaudeMCPServer::Start(uint32 Port)
 		ToolRegistry->StartTaskQueue();
 	}
 
-	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Server started on http://localhost:%d"), ServerPort);
+	// FHttpServerModule binds to all interfaces on the chosen port. Auth is
+	// required on every route, CORS is localhost-only, and the token is
+	// session-scoped + deleted on Stop. Prefer firewalling the port if the
+	// host is multi-user. Binding exclusively to 127.0.0.1 is not exposed by
+	// the stock HTTPServer module API used here.
+	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Server started on port %d (auth required; treat as localhost-only)"), ServerPort);
 	UE_LOG(LogUnrealClaude, Log, TEXT("  GET  /mcp/tools      - List available tools"));
 	UE_LOG(LogUnrealClaude, Log, TEXT("  POST /mcp/tool/{name} - Execute a tool"));
 	UE_LOG(LogUnrealClaude, Log, TEXT("  GET  /mcp/status     - Server status"));
@@ -98,6 +138,15 @@ void FUnrealClaudeMCPServer::Stop()
 	}
 
 	bIsRunning = false;
+
+	// Delete the runtime MCP config so the session token is not left on disk.
+	const FString MCPConfigPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealClaude"), TEXT("mcp-config.json"));
+	if (IFileManager::Get().FileExists(*MCPConfigPath))
+	{
+		IFileManager::Get().Delete(*MCPConfigPath);
+		UE_LOG(LogUnrealClaude, Log, TEXT("Deleted runtime MCP config: %s"), *MCPConfigPath);
+	}
+
 	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Server stopped"));
 }
 
@@ -135,6 +184,12 @@ void FUnrealClaudeMCPServer::SetupRoutes()
 
 bool FUnrealClaudeMCPServer::HandleListTools(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+	if (!IsAuthorized(Request))
+	{
+		OnComplete(CreateErrorResponse(TEXT("Unauthorized"), EHttpServerResponseCodes::Unauthorized));
+		return true;
+	}
+
 	TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
 
 	TArray<TSharedPtr<FJsonValue>> ToolsArray;
@@ -187,6 +242,12 @@ bool FUnrealClaudeMCPServer::HandleListTools(const FHttpServerRequest& Request, 
 
 bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+	if (!IsAuthorized(Request))
+	{
+		OnComplete(CreateErrorResponse(TEXT("Unauthorized"), EHttpServerResponseCodes::Unauthorized));
+		return true;
+	}
+
 	FString RelativePath = Request.RelativePath.GetPath();
 
 	FString ToolName;
@@ -226,7 +287,9 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyString);
 		if (!FJsonSerializer::Deserialize(Reader, ParamsJson) || !ParamsJson.IsValid())
 		{
-			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse JSON body: %s"), *BodyString);
+			// Do not echo arbitrary request bodies into the editor log. Requests may
+			// contain secrets or large attacker-controlled payloads.
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to parse JSON body (%d bytes)"), Request.Body.Num());
 			OnComplete(CreateErrorResponse(TEXT("Invalid JSON body"), EHttpServerResponseCodes::BadRequest));
 			return true;
 		}
@@ -250,6 +313,14 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
 	FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
 
+	if (static_cast<int64>(JsonString.Len()) * sizeof(TCHAR) > UnrealClaudeConstants::MCPServer::MaxResponseSize)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("MCP response too large: %d characters (%lld bytes, max %d bytes)"),
+			JsonString.Len(), static_cast<int64>(JsonString.Len()) * sizeof(TCHAR), UnrealClaudeConstants::MCPServer::MaxResponseSize);
+		OnComplete(CreateErrorResponse(TEXT("MCP response exceeded the maximum response size"), EHttpServerResponseCodes::InternalServerError));
+		return true;
+	}
+
 	EHttpServerResponseCodes Code = Result.bSuccess ? EHttpServerResponseCodes::Ok : EHttpServerResponseCodes::BadRequest;
 	OnComplete(CreateJsonResponse(JsonString, Code));
 	return true;
@@ -257,11 +328,17 @@ bool FUnrealClaudeMCPServer::HandleExecuteTool(const FHttpServerRequest& Request
 
 bool FUnrealClaudeMCPServer::HandleStatus(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+	if (!IsAuthorized(Request))
+	{
+		OnComplete(CreateErrorResponse(TEXT("Unauthorized"), EHttpServerResponseCodes::Unauthorized));
+		return true;
+	}
+
 	TSharedPtr<FJsonObject> ResponseJson = MakeShared<FJsonObject>();
 
 	ResponseJson->SetStringField(TEXT("status"), TEXT("running"));
 	ResponseJson->SetNumberField(TEXT("port"), ServerPort);
-	ResponseJson->SetStringField(TEXT("version"), TEXT("1.0.0"));
+	ResponseJson->SetStringField(TEXT("version"), TEXT("1.5.1"));
 	ResponseJson->SetNumberField(TEXT("toolCount"), ToolRegistry.IsValid() ? ToolRegistry->GetAllTools().Num() : 0);
 
 	if (ToolRegistry.IsValid())
@@ -290,6 +367,12 @@ bool FUnrealClaudeMCPServer::HandleStatus(const FHttpServerRequest& Request, con
 
 bool FUnrealClaudeMCPServer::HandleProjectContext(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+	if (!IsAuthorized(Request))
+	{
+		OnComplete(CreateErrorResponse(TEXT("Unauthorized"), EHttpServerResponseCodes::Unauthorized));
+		return true;
+	}
+
 	FProjectContextManager& ContextMgr = FProjectContextManager::Get();
 	ContextMgr.GetContext(); // ensure fresh context is available
 
@@ -308,6 +391,50 @@ bool FUnrealClaudeMCPServer::HandleProjectContext(const FHttpServerRequest& Requ
 	return true;
 }
 
+bool FUnrealClaudeMCPServer::IsAuthorized(const FHttpServerRequest& Request) const
+{
+	// HTTP headers are case-insensitive per RFC 7230. Node's fetch often sends
+	// "authorization" (lowercase). Scan the map case-insensitively.
+	const TArray<FString>* AuthorizationValues = nullptr;
+	for (const auto& HeaderPair : Request.Headers)
+	{
+		if (HeaderPair.Key.Equals(TEXT("Authorization"), ESearchCase::IgnoreCase))
+		{
+			AuthorizationValues = &HeaderPair.Value;
+			break;
+		}
+	}
+	if (!AuthorizationValues)
+	{
+		return false;
+	}
+
+	const FString Expected = FString::Printf(TEXT("Bearer %s"), *AuthToken);
+	bool bMatched = false;
+	for (const FString& AuthorizationValue : *AuthorizationValues)
+	{
+		// Constant-time compare over the full expected length to avoid timing leaks
+		// on prefix mismatches. Always walks Max(len(a), len(b)) characters.
+		const int32 LenA = AuthorizationValue.Len();
+		const int32 LenB = Expected.Len();
+		const int32 MaxLen = FMath::Max(LenA, LenB);
+		uint8 Diff = static_cast<uint8>(LenA != LenB ? 1 : 0);
+		for (int32 i = 0; i < MaxLen; ++i)
+		{
+			const TCHAR CA = i < LenA ? AuthorizationValue[i] : 0;
+			const TCHAR CB = i < LenB ? Expected[i] : 0;
+			Diff |= static_cast<uint8>(CA != CB ? 1 : 0);
+		}
+		if (Diff == 0)
+		{
+			bMatched = true;
+			// Do not break early — keep scanning remaining values with the same work.
+		}
+	}
+
+	return bMatched;
+}
+
 TUniquePtr<FHttpServerResponse> FUnrealClaudeMCPServer::CreateJsonResponse(const FString& JsonContent, EHttpServerResponseCodes Code)
 {
 	TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(JsonContent, TEXT("application/json"));
@@ -316,7 +443,7 @@ TUniquePtr<FHttpServerResponse> FUnrealClaudeMCPServer::CreateJsonResponse(const
 	// Add CORS headers - restricted to localhost for security
 	Response->Headers.Add(TEXT("Access-Control-Allow-Origin"), { TEXT("http://localhost") });
 	Response->Headers.Add(TEXT("Access-Control-Allow-Methods"), { TEXT("GET, POST, OPTIONS") });
-	Response->Headers.Add(TEXT("Access-Control-Allow-Headers"), { TEXT("Content-Type") });
+	Response->Headers.Add(TEXT("Access-Control-Allow-Headers"), { TEXT("Content-Type, Authorization") });
 
 	return Response;
 }

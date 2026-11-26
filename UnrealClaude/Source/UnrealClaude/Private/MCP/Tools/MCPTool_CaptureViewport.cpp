@@ -2,6 +2,7 @@
 
 #include "MCPTool_CaptureViewport.h"
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeConstants.h"
 #include "Editor.h"
 #include "LevelEditor.h"
 #include "SLevelViewport.h"
@@ -60,9 +61,16 @@ FMCPToolResult FMCPTool_CaptureViewport::Execute(const TSharedRef<FJsonObject>& 
 	}
 
 	const FIntPoint ViewportSize = Viewport->GetSizeXY();
+	const int64 ViewportPixelCount = static_cast<int64>(ViewportSize.X) * static_cast<int64>(ViewportSize.Y);
 	if (ViewportSize.X <= 0 || ViewportSize.Y <= 0)
 	{
 		return FMCPToolResult::Error(TEXT("Viewport has invalid size."));
+	}
+	if (ViewportPixelCount > UnrealClaudeConstants::MCPServer::MaxViewportPixels)
+	{
+		return FMCPToolResult::Error(FString::Printf(
+			TEXT("Viewport is too large to capture safely (%lld pixels, maximum %lld). Resize the viewport and retry."),
+			ViewportPixelCount, UnrealClaudeConstants::MCPServer::MaxViewportPixels));
 	}
 
 	TArray<FColor> Pixels;

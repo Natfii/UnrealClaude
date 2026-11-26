@@ -124,6 +124,12 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 	}
 
 	FString LogOutput = FString::Join(ResultLines, TEXT("\n"));
+	bool bTruncated = false;
+	if (LogOutput.Len() > UnrealClaudeConstants::MCPServer::MaxOutputLogContentSize)
+	{
+		LogOutput.LeftInline(UnrealClaudeConstants::MCPServer::MaxOutputLogContentSize);
+		bTruncated = true;
+	}
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("log_file"), LogFilePath);
@@ -135,6 +141,11 @@ FMCPToolResult FMCPTool_GetOutputLog::Execute(const TSharedRef<FJsonObject>& Par
 		ResultData->SetNumberField(TEXT("filtered_lines"), FilteredLines.Num());
 	}
 	ResultData->SetStringField(TEXT("content"), LogOutput);
+	if (bTruncated)
+	{
+		ResultData->SetBoolField(TEXT("truncated"), true);
+		ResultData->SetNumberField(TEXT("max_content_characters"), UnrealClaudeConstants::MCPServer::MaxOutputLogContentSize);
+	}
 
 	return FMCPToolResult::Success(
 		FString::Printf(TEXT("Retrieved %d log lines from %s"), ResultLines.Num(), *FPaths::GetCleanFilename(LogFilePath)),

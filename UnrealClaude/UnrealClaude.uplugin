@@ -3,7 +3,7 @@
 	"Version": 13,
 	"VersionName": "1.5.1",
 	"FriendlyName": "Unreal Claude",
-	"Description": "Claude Code CLI integration for Unreal Engine 5.7. Get AI coding assistance with built-in UE5.7 documentation context directly in the editor.",
+	"Description": "Claude Code CLI integration for Unreal Engine 5.7 (current support). Get AI coding assistance with built-in UE5.7 documentation context directly in the editor. Other engine versions are not yet validated.",
 	"Category": "Editor",
 	"CreatedBy": "Natali Caggiano",
 	"CreatedByURL": "https://github.com/Natfii",
@@ -29,7 +29,7 @@
 		{
 			"Name": "EditorScriptingUtilities",
 			"Enabled": true,
-			"Optional": true
+			"Optional": false
 		},
 		{
 			"Name": "EnhancedInput",

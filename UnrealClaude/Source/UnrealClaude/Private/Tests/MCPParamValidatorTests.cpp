@@ -261,6 +261,18 @@ void FMCPParamValidatorSpec::Define()
 			});
 		});
 
+		Describe(TEXT("blocks interpreter escapes"), [this]()
+		{
+			It("blocks py / python / keybind / setbind", [this]()
+			{
+				FString Error;
+				TestFalse(TEXT("py"), FMCPParamValidator::ValidateConsoleCommand(TEXT("py print(1)"), Error));
+				TestFalse(TEXT("python"), FMCPParamValidator::ValidateConsoleCommand(TEXT("python -c \"print(1)\""), Error));
+				TestFalse(TEXT("keybind"), FMCPParamValidator::ValidateConsoleCommand(TEXT("keybind f1 quit"), Error));
+				TestFalse(TEXT("setbind"), FMCPParamValidator::ValidateConsoleCommand(TEXT("setbind f1 quit"), Error));
+			});
+		});
+
 		Describe(TEXT("accepts safe commands"), [this]()
 		{
 			It("accepts 'stat fps'", [this]()

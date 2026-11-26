@@ -14,6 +14,15 @@ FMCPTaskQueue::FMCPTaskQueue(FMCPToolRegistry* InToolRegistry)
 	, WakeUpEvent(nullptr)
 	, LastCleanupTime(FDateTime::UtcNow())
 {
+	ActiveAsyncJobs = MakeShared<TAtomic<int32>, ESPMode::ThreadSafe>(0);
+	AsyncJobsIdleEvent = MakeShareable(
+		FPlatformProcess::GetSynchEventFromPool(),
+		[](FEvent* Event) { FPlatformProcess::ReturnSynchEventToPool(Event); });
+	if (AsyncJobsIdleEvent)
+	{
+		AsyncJobsIdleEvent->Trigger();
+	}
+
 	WakeUpEvent = FPlatformProcess::GetSynchEventFromPool();
 	if (!WakeUpEvent)
 	{
@@ -29,6 +38,8 @@ FMCPTaskQueue::~FMCPTaskQueue()
 		FPlatformProcess::ReturnSynchEventToPool(WakeUpEvent);
 		WakeUpEvent = nullptr;
 	}
+	AsyncJobsIdleEvent.Reset();
+	ActiveAsyncJobs.Reset();
 }
 
 void FMCPTaskQueue::Start()
@@ -59,8 +70,13 @@ void FMCPTaskQueue::Start()
 
 void FMCPTaskQueue::Stop()
 {
-	// Called by FRunnableThread when Kill() is invoked
-	bShouldStop = true;
+	// Called by FRunnableThread when Kill() is invoked. Serialize the stop
+	// transition with task insertion so a submit racing with shutdown cannot
+	// enqueue a task after the worker has been stopped.
+	{
+		FScopeLock Lock(&TasksLock);
+		bShouldStop = true;
+	}
 
 	if (WakeUpEvent)
 	{
@@ -71,34 +87,63 @@ void FMCPTaskQueue::Stop()
 void FMCPTaskQueue::Shutdown()
 {
 	FRunnableThread* ThreadToKill = WorkerThread;
-	if (!ThreadToKill)
-	{
-		return;
-	}
-
-	// Clear the pointer first to prevent re-entry
-	WorkerThread = nullptr;
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue shutting down..."));
+	{
+		FScopeLock Lock(&TasksLock);
+		bShouldStop = true;
 
-	// Set stop flag explicitly (in case Kill doesn't call Stop properly)
-	bShouldStop = true;
-
+		// Mark pending tasks cancelled while holding the same lock used by
+		// SubmitTask(). This closes the shutdown/submit race and prevents a
+		// pending task from being stranded after the worker exits.
+		for (auto& Pair : Tasks)
+		{
+			TSharedPtr<FMCPAsyncTask>& Task = Pair.Value;
+			FScopeLock StateScopeLock(&Task->StateLock);
+			if (Task->Status.Load() == EMCPTaskStatus::Pending)
+			{
+				Task->bCancellationRequested = true;
+				Task->Status.Store(EMCPTaskStatus::Cancelled);
+				Task->CompletedTime = FDateTime::UtcNow();
+				Task->Result = FMCPToolResult::Error(TEXT("Task cancelled because the task queue is shutting down"));
+			}
+		}
+	}
 	if (WakeUpEvent)
 	{
 		WakeUpEvent->Trigger();
 	}
 
-	// Kill() calls our Stop() then waits for Run() to return
-	ThreadToKill->Kill(true);
+	// Running tasks might be blocked waiting for a game-thread ticker. Cancel
+	// those callbacks before waiting for the detached workers, otherwise shutdown
+	// from the game thread could deadlock waiting for itself.
+	CancelGameThreadExecutions();
 
-	delete ThreadToKill;
+	if (ThreadToKill)
+	{
+		WorkerThread = nullptr;
+		ThreadToKill->Kill(true);
+		delete ThreadToKill;
+	}
+
+	// Detached jobs capture task data, not the queue lifetime. Wait until every
+	// job has finished before the registry destroys the tools they execute.
+	if (ActiveAsyncJobs.IsValid() && AsyncJobsIdleEvent.IsValid() && ActiveAsyncJobs->Load() > 0)
+	{
+		AsyncJobsIdleEvent->Wait();
+	}
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("MCP Task Queue stopped"));
 }
 
 FGuid FMCPTaskQueue::SubmitTask(const FString& ToolName, TSharedPtr<FJsonObject> Parameters, uint32 TimeoutMs)
 {
+	if (bShouldStop)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Cannot submit task while task queue is stopped"));
+		return FGuid();
+	}
+
 	if (ToolRegistry && !ToolRegistry->HasTool(ToolName))
 	{
 		UE_LOG(LogUnrealClaude, Warning, TEXT("Cannot submit task: Tool '%s' not found"), *ToolName);
@@ -152,7 +197,13 @@ TSharedPtr<FMCPAsyncTask> FMCPTaskQueue::GetTask(const FGuid& TaskId) const
 bool FMCPTaskQueue::GetTaskResult(const FGuid& TaskId, FMCPToolResult& OutResult) const
 {
 	TSharedPtr<FMCPAsyncTask> Task = GetTask(TaskId);
-	if (!Task.IsValid() || !Task->IsComplete())
+	if (!Task.IsValid())
+	{
+		return false;
+	}
+
+	FScopeLock StateScopeLock(&Task->StateLock);
+	if (!Task->IsComplete())
 	{
 		return false;
 	}
@@ -169,24 +220,25 @@ bool FMCPTaskQueue::CancelTask(const FGuid& TaskId)
 		return false;
 	}
 
-	EMCPTaskStatus CurrentStatus = Task->Status.Load();
+	FScopeLock StateScopeLock(&Task->StateLock);
+	const EMCPTaskStatus CurrentStatus = Task->Status.Load();
 	if (CurrentStatus == EMCPTaskStatus::Pending)
 	{
+		Task->bCancellationRequested = true;
 		Task->Status.Store(EMCPTaskStatus::Cancelled);
 		Task->CompletedTime = FDateTime::UtcNow();
 		Task->Result = FMCPToolResult::Error(TEXT("Task cancelled before execution"));
 		UE_LOG(LogUnrealClaude, Log, TEXT("Task cancelled (pending): %s"), *TaskId.ToString());
 		return true;
 	}
-	else if (CurrentStatus == EMCPTaskStatus::Running)
+	if (CurrentStatus == EMCPTaskStatus::Running)
 	{
-		// Running tasks can only be flagged — actual cancellation is cooperative
 		Task->bCancellationRequested = true;
 		UE_LOG(LogUnrealClaude, Log, TEXT("Task cancellation requested (running): %s"), *TaskId.ToString());
 		return true;
 	}
 
-	return false; // Already complete
+	return false;
 }
 
 TArray<TSharedPtr<FMCPAsyncTask>> FMCPTaskQueue::GetAllTasks(bool bIncludeCompleted) const
@@ -265,14 +317,28 @@ uint32 FMCPTaskQueue::Run()
 		if (bHasTask)
 		{
 			TSharedPtr<FMCPAsyncTask> Task = GetTask(TaskId);
-			if (Task.IsValid())
+			if (Task.IsValid() && ActiveAsyncJobs.IsValid())
 			{
 				RunningTaskCount++;
+				if (AsyncJobsIdleEvent.IsValid() && ActiveAsyncJobs->Load() == 0)
+				{
+					AsyncJobsIdleEvent->Reset();
+				}
+				ActiveAsyncJobs->IncrementExchange();
 
-				AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, Task]()
+				// Shutdown waits for ActiveAsyncJobs to reach zero before destroying
+				// this queue or the registry and tools it owns.
+				TSharedPtr<TAtomic<int32>, ESPMode::ThreadSafe> SharedActiveJobs = ActiveAsyncJobs;
+				TSharedPtr<FEvent, ESPMode::ThreadSafe> SharedIdleEvent = AsyncJobsIdleEvent;
+				AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, Task, SharedActiveJobs, SharedIdleEvent]()
 				{
 					ExecuteTask(Task);
 					RunningTaskCount--;
+					const int32 Remaining = SharedActiveJobs->DecrementExchange();
+					if (Remaining == 0 && SharedIdleEvent.IsValid())
+					{
+						SharedIdleEvent->Trigger();
+					}
 				});
 			}
 		}
@@ -285,8 +351,17 @@ uint32 FMCPTaskQueue::Run()
 			LastCleanupTime = Now;
 		}
 
-		// Sleep to avoid consuming 100% CPU and allow responsive shutdown
-		FPlatformProcess::Sleep(0.01f);
+		// Block on the wake event instead of busy-polling at 10 ms.
+		// SubmitTask / Stop / Shutdown trigger WakeUpEvent; cleanup interval is the max wait.
+		if (WakeUpEvent)
+		{
+			const uint32 WaitMs = static_cast<uint32>(FMath::Max(100.0f, Config.CleanupIntervalSeconds * 1000.0f));
+			WakeUpEvent->Wait(WaitMs);
+		}
+		else
+		{
+			FPlatformProcess::Sleep(0.05f);
+		}
 	}
 
 	return 0;
@@ -297,6 +372,7 @@ void FMCPTaskQueue::Exit()
 	FScopeLock Lock(&TasksLock);
 	for (auto& Pair : Tasks)
 	{
+		FScopeLock StateScopeLock(&Pair.Value->StateLock);
 		if (!Pair.Value->IsComplete())
 		{
 			Pair.Value->bCancellationRequested = true;
@@ -311,17 +387,27 @@ void FMCPTaskQueue::ExecuteTask(TSharedPtr<FMCPAsyncTask> Task)
 		return;
 	}
 
-	Task->Status.Store(EMCPTaskStatus::Running);
-	Task->StartedTime = FDateTime::UtcNow();
+	{
+		FScopeLock StateScopeLock(&Task->StateLock);
+		if (Task->Status.Load() != EMCPTaskStatus::Pending)
+		{
+			return;
+		}
+		Task->Status.Store(EMCPTaskStatus::Running);
+		Task->StartedTime = FDateTime::UtcNow();
+	}
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Task started: %s (tool: %s)"), *Task->TaskId.ToString(), *Task->ToolName);
 
-	if (Task->bCancellationRequested)
 	{
-		Task->Status.Store(EMCPTaskStatus::Cancelled);
-		Task->CompletedTime = FDateTime::UtcNow();
-		Task->Result = FMCPToolResult::Error(TEXT("Task cancelled"));
-		return;
+		FScopeLock StateScopeLock(&Task->StateLock);
+		if (Task->bCancellationRequested)
+		{
+			Task->Status.Store(EMCPTaskStatus::Cancelled);
+			Task->CompletedTime = FDateTime::UtcNow();
+			Task->Result = FMCPToolResult::Error(TEXT("Task cancelled"));
+			return;
+		}
 	}
 
 	TSharedRef<FJsonObject> Params = Task->Parameters.IsValid()
@@ -330,36 +416,68 @@ void FMCPTaskQueue::ExecuteTask(TSharedPtr<FMCPAsyncTask> Task)
 
 	FMCPToolResult Result;
 
-	// For long-running tools (execute_script), dispatch to game thread directly
-	// with the task's own timeout instead of the registry's 30-second default.
-	// This allows permission dialogs + Live Coding compilation to take their time.
 	IMCPTool* Tool = ToolRegistry->FindTool(Task->ToolName);
 	if (!Tool)
 	{
 		Result = FMCPToolResult::Error(FString::Printf(TEXT("Tool '%s' not found"), *Task->ToolName));
 	}
-	else if (Task->TimeoutMs > 30000)
+	else
 	{
-		// Long-running task: bypass registry's 30s game thread timeout
+		// Execute every queued tool through the same ticker-based game-thread
+		// path. This avoids the registry's fixed 30-second wait and gives the
+		// task its own timeout. The ticker handle is retained on the task so
+		// shutdown can cancel it before waiting for worker jobs.
 		TSharedPtr<FMCPToolResult> SharedResult = MakeShared<FMCPToolResult>();
 		TSharedPtr<FEvent, ESPMode::ThreadSafe> CompletionEvent = MakeShareable(
 			FPlatformProcess::GetSynchEventFromPool(),
 			[](FEvent* Event) { FPlatformProcess::ReturnSynchEventToPool(Event); });
 		TSharedPtr<TAtomic<bool>, ESPMode::ThreadSafe> bCompleted = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
 
-		// Use FTSTicker to dispatch to game thread at a safe point between subsystem ticks.
-		// AsyncTask(GameThread) can fire during streaming manager iteration, causing
-		// re-entrancy into LevelRenderAssetManagersLock (assertion crash).
-		FTSTicker::GetCoreTicker().AddTicker(TEXT("MCPTask_Execute"), 0.0f,
-			[SharedResult, Tool, Params, CompletionEvent, bCompleted](float) -> bool
+		FDelegateHandle TickerHandle = FTSTicker::GetCoreTicker().AddTicker(TEXT("MCPTask_Execute"), 0.0f,
+			[SharedResult, Tool, Params, CompletionEvent, bCompleted, Task](float) -> bool
 		{
+			{
+				FScopeLock StateScopeLock(&Task->StateLock);
+				if (Task->bCancellationRequested)
+				{
+					CompletionEvent->Trigger();
+					return false;
+				}
+			}
+
 			*SharedResult = Tool->Execute(Params);
 			*bCompleted = true;
 			CompletionEvent->Trigger();
-			return false; // One-shot, don't reschedule
+			return false;
 		});
 
+		bool bCancelImmediately = false;
+		{
+			FScopeLock StateScopeLock(&Task->StateLock);
+			Task->GameThreadCompletionEvent = CompletionEvent;
+			Task->GameThreadTickerHandle = TickerHandle;
+			bCancelImmediately = Task->bCancellationRequested;
+		}
+
+		// Shutdown/cancellation might have won the race before the ticker handle
+		// was stored. Remove the callback and wake the worker immediately.
+		if (bCancelImmediately)
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
+			CompletionEvent->Trigger();
+		}
+
 		const bool bSignaled = CompletionEvent->Wait(Task->TimeoutMs);
+		{
+			FScopeLock StateScopeLock(&Task->StateLock);
+			if (Task->GameThreadTickerHandle.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(Task->GameThreadTickerHandle);
+				Task->GameThreadTickerHandle.Reset();
+			}
+			Task->GameThreadCompletionEvent.Reset();
+		}
+
 		if (!bSignaled || !(*bCompleted))
 		{
 			UE_LOG(LogUnrealClaude, Error, TEXT("Task '%s' timed out after %d ms on game thread"),
@@ -372,31 +490,66 @@ void FMCPTaskQueue::ExecuteTask(TSharedPtr<FMCPAsyncTask> Task)
 			Result = *SharedResult;
 		}
 	}
-	else
+
 	{
-		// Normal tools: use registry's standard game thread dispatch (30s timeout)
-		Result = ToolRegistry->ExecuteTool(Task->ToolName, Params);
+		FScopeLock StateScopeLock(&Task->StateLock);
+		if (Task->Status.Load() == EMCPTaskStatus::TimedOut)
+		{
+			// Timeout is a terminal state and wins the race with task completion.
+		}
+		else if (Task->bCancellationRequested)
+		{
+			Task->Status.Store(EMCPTaskStatus::Cancelled);
+			Task->Result = FMCPToolResult::Error(TEXT("Task cancelled during execution"));
+			Task->CompletedTime = FDateTime::UtcNow();
+		}
+		else
+		{
+			Task->Status.Store(Result.bSuccess ? EMCPTaskStatus::Completed : EMCPTaskStatus::Failed);
+			Task->Result = Result;
+			Task->CompletedTime = FDateTime::UtcNow();
+		}
 	}
 
-	if (Task->bCancellationRequested)
 	{
-		Task->Status.Store(EMCPTaskStatus::Cancelled);
-		Task->Result = FMCPToolResult::Error(TEXT("Task cancelled during execution"));
+		FScopeLock StateScopeLock(&Task->StateLock);
+		if (Task->Status.Load() == EMCPTaskStatus::Completed ||
+			Task->Status.Load() == EMCPTaskStatus::Failed)
+		{
+			Task->Progress.Store(100);
+		}
 	}
-	else
-	{
-		Task->Status.Store(Result.bSuccess ? EMCPTaskStatus::Completed : EMCPTaskStatus::Failed);
-		Task->Result = Result;
-	}
-
-	Task->CompletedTime = FDateTime::UtcNow();
-	Task->Progress.Store(100);
 
 	FTimespan Duration = Task->CompletedTime - Task->StartedTime;
 	UE_LOG(LogUnrealClaude, Log, TEXT("Task completed: %s (status: %s, duration: %.2fs)"),
 		*Task->TaskId.ToString(),
 		*FMCPAsyncTask::StatusToString(Task->Status.Load()),
 		Duration.GetTotalSeconds());
+}
+
+void FMCPTaskQueue::CancelGameThreadExecutions()
+{
+	FScopeLock TasksScopeLock(&TasksLock);
+	for (auto& Pair : Tasks)
+	{
+		TSharedPtr<FMCPAsyncTask>& Task = Pair.Value;
+		FScopeLock StateScopeLock(&Task->StateLock);
+		if (Task->Status.Load() != EMCPTaskStatus::Running)
+		{
+			continue;
+		}
+
+		Task->bCancellationRequested = true;
+		if (Task->GameThreadTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(Task->GameThreadTickerHandle);
+			Task->GameThreadTickerHandle.Reset();
+		}
+		if (Task->GameThreadCompletionEvent.IsValid())
+		{
+			Task->GameThreadCompletionEvent->Trigger();
+		}
+	}
 }
 
 void FMCPTaskQueue::CleanupOldTasks()
@@ -409,6 +562,7 @@ void FMCPTaskQueue::CleanupOldTasks()
 		FScopeLock Lock(&TasksLock);
 		for (const auto& Pair : Tasks)
 		{
+			FScopeLock StateScopeLock(&Pair.Value->StateLock);
 			if (Pair.Value->IsComplete() && Pair.Value->CompletedTime < CutoffTime)
 			{
 				TasksToRemove.Add(Pair.Key);
@@ -435,6 +589,7 @@ void FMCPTaskQueue::CheckTimeouts()
 	for (auto& Pair : Tasks)
 	{
 		TSharedPtr<FMCPAsyncTask>& Task = Pair.Value;
+		FScopeLock StateScopeLock(&Task->StateLock);
 		if (Task->Status.Load() == EMCPTaskStatus::Running)
 		{
 			FTimespan Elapsed = Now - Task->StartedTime;
@@ -445,6 +600,11 @@ void FMCPTaskQueue::CheckTimeouts()
 				Task->CompletedTime = Now;
 				Task->Result = FMCPToolResult::Error(
 					FString::Printf(TEXT("Task timed out after %d ms"), Task->TimeoutMs));
+				// Wake a worker waiting for game-thread execution.
+				if (Task->GameThreadCompletionEvent.IsValid())
+				{
+					Task->GameThreadCompletionEvent->Trigger();
+				}
 				UE_LOG(LogUnrealClaude, Warning, TEXT("Task timed out: %s"), *Task->TaskId.ToString());
 			}
 		}

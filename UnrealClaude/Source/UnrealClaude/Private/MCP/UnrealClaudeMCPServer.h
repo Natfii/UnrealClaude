@@ -31,6 +31,9 @@ public:
 	/** Get the server port */
 	uint32 GetPort() const { return ServerPort; }
 
+	/** Get the per-editor-session bearer token used by the MCP bridge. */
+	const FString& GetAuthToken() const { return AuthToken; }
+
 	/** Get the tool registry */
 	TSharedPtr<FMCPToolRegistry> GetToolRegistry() const { return ToolRegistry; }
 
@@ -56,6 +59,9 @@ private:
 	/** Helper to create error response */
 	TUniquePtr<FHttpServerResponse> CreateErrorResponse(const FString& Message, EHttpServerResponseCodes Code = EHttpServerResponseCodes::BadRequest);
 
+	/** Validate the Authorization: Bearer <token> header. */
+	bool IsAuthorized(const FHttpServerRequest& Request) const;
+
 private:
 	/** HTTP router handle */
 	TSharedPtr<IHttpRouter> HttpRouter;
@@ -72,4 +78,5 @@ private:
 	/** Server state */
 	bool bIsRunning;
 	uint32 ServerPort;
+	FString AuthToken;
 };

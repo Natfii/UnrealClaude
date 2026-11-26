@@ -100,8 +100,8 @@ struct UNREALCLAUDE_API FClaudeRequestConfig
 	/** Use JSON output format for structured responses */
 	bool bUseJsonOutput = false;
 
-	/** Skip permission prompts (--dangerously-skip-permissions) */
-	bool bSkipPermissions = true;
+	/** Skip permission prompts (--dangerously-skip-permissions). Disabled by default. */
+	bool bSkipPermissions = false;
 
 	/** Timeout in seconds (0 = no timeout) */
 	float TimeoutSeconds = 300.0f;

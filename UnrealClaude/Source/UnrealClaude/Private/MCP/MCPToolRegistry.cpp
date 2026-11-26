@@ -206,13 +206,27 @@ FMCPToolResult FMCPToolRegistry::ExecuteTool(const FString& ToolName, const TSha
 			[](FEvent* Event) { FPlatformProcess::ReturnSynchEventToPool(Event); });
 		TSharedPtr<TAtomic<bool>, ESPMode::ThreadSafe> bTaskCompleted = MakeShared<TAtomic<bool>, ESPMode::ThreadSafe>(false);
 
+		// Hold a shared reference to the tool inside the ticker callback.
+		// Capturing FoundTool would retain a pointer into the registry's TMap.
+		// The registry may be destroyed or the entry replaced while the callback
+		// is waiting on the game thread, leaving the callback with a dangling pointer.
+		TSharedPtr<IMCPTool> Tool = *FoundTool;
+
 		// Use FTSTicker to dispatch to game thread at a safe point between subsystem ticks.
 		// AsyncTask(GameThread) can fire during streaming manager iteration, causing
 		// re-entrancy into LevelRenderAssetManagersLock (assertion crash).
-		FTSTicker::GetCoreTicker().AddTicker(TEXT("MCPTool_Execute"), 0.0f,
-			[SharedResult, FoundTool, Params, CompletionEvent, bTaskCompleted](float) -> bool
+		FDelegateHandle TickerHandle = FTSTicker::GetCoreTicker().AddTicker(TEXT("MCPTool_Execute"), 0.0f,
+			[SharedResult, Tool, Params, CompletionEvent, bTaskCompleted](float) -> bool
 		{
-			*SharedResult = (*FoundTool)->Execute(Params);
+			if (!Tool.IsValid())
+			{
+				*SharedResult = FMCPToolResult::Error(TEXT("MCP tool is no longer available"));
+				*bTaskCompleted = true;
+				CompletionEvent->Trigger();
+				return false;
+			}
+
+			*SharedResult = Tool->Execute(Params);
 			*bTaskCompleted = true;
 			CompletionEvent->Trigger();
 			return false; // One-shot, don't reschedule
@@ -224,6 +238,10 @@ FMCPToolResult FMCPToolRegistry::ExecuteTool(const FString& ToolName, const TSha
 
 		if (!bSignaled || !(*bTaskCompleted))
 		{
+			// Prevent a timed-out request from leaving a pending ticker callback
+			// behind. Removing the handle does not interrupt a callback already
+			// running on the game thread, so the callback still uses shared state.
+			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
 			UE_LOG(LogUnrealClaude, Error, TEXT("Tool '%s' execution timed out after %d ms"), *ToolName, TimeoutMs);
 			return FMCPToolResult::Error(FString::Printf(TEXT("Tool execution timed out after %d seconds"), TimeoutMs / 1000));
 		}

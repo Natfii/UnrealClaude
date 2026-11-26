@@ -96,8 +96,10 @@ void FClaudeCodeSubsystem::SendPrompt(
 
 	Config.Prompt = BuildPromptWithHistory(Prompt);
 	Config.WorkingDirectory = FPaths::ProjectDir();
-	Config.bSkipPermissions = true;
-	Config.AllowedTools = { TEXT("Read"), TEXT("Write"), TEXT("Edit"), TEXT("Grep"), TEXT("Glob"), TEXT("Bash") };
+	// Keep Claude Code's permission system enabled. Bash is intentionally not granted
+	// by default because it provides unrestricted host-process access.
+	Config.bSkipPermissions = false;
+	Config.AllowedTools = { TEXT("Read"), TEXT("Write"), TEXT("Edit"), TEXT("Grep"), TEXT("Glob") };
 
 	Config.AttachedImagePaths = Options.AttachedImagePaths;
 
@@ -159,8 +161,8 @@ FString FClaudeCodeSubsystem::GetUE57SystemPrompt() const
 
 FString FClaudeCodeSubsystem::GetProjectContextPrompt() const
 {
-	// Lightweight one-liner summary only — keeps this block stable for prompt caching.
-	// Full class list, source tree, and level actors are available via unreal_get_project_context.
+	// Lightweight one-liner summary only (Phase 6) — keeps this block stable for prompt caching.
+	// Full class list, source tree, and level actors remain available on demand via unreal_get_project_context.
 	const FString Summary = FProjectContextManager::Get().GetContextSummary();
 
 	FString Context;

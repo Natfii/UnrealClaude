@@ -390,13 +390,14 @@ FString FProjectContextManager::GetContextSummary() const
 		return TEXT("No context gathered yet");
 	}
 
+	// Compact one-line summary used by default in chat prompts (Phase 6).
+	// Full details remain available on demand via FormatContextForPrompt / unreal_get_project_context.
 	return FString::Printf(
-		TEXT("%s | %d files | %d classes | %d actors | %d assets"),
+		TEXT("%s | %d src | %d cls | %d actors"),
 		*CachedContext.ProjectName,
 		CachedContext.SourceFiles.Num(),
 		CachedContext.UClasses.Num(),
-		CachedContext.LevelActors.Num(),
-		CachedContext.AssetCount
+		CachedContext.LevelActors.Num()
 	);
 }
 

@@ -27,26 +27,23 @@ public class UnrealClaude : ModuleRules
 				"InputCore",
 				"Slate",
 				"SlateCore",
-				"EditorStyle",
 				"UnrealEd",
+				"LevelEditor",
 				"ToolMenus",
 				"Projects",
 				"EditorFramework",
-				"WorkspaceMenuStructure"
+				"WorkspaceMenuStructure",
+				"DeveloperSettings",
+				"Json"
 			}
 		);
 			
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				// Project Settings -> Plugins -> Unreal Claude (UUnrealClaudeSettings)
-				"DeveloperSettings",
-				"Json",
 				"JsonUtilities",
 				"HTTP",
 				"HTTPServer",
-				"Sockets",
-				"Networking",
 				"ImageWrapper",
 				// Blueprint manipulation
 				"Kismet",

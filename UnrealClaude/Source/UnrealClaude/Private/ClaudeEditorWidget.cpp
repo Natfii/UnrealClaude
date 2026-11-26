@@ -1566,7 +1566,7 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 		StatusMessage += TEXT("Troubleshooting:\n");
 		StatusMessage += TEXT("  • Check Output Log for MCP errors\n");
 		StatusMessage += TEXT("  • Run: npm install in Resources/mcp-bridge\n");
-		StatusMessage += FString::Printf(TEXT("  • Verify port %d is available\n"), UnrealClaudeConstants::MCPServer::DefaultPort);
+		StatusMessage += FString::Printf(TEXT("  • Verify port %d is available\n"), FUnrealClaudeModule::GetMCPServerPort());
 		StatusMessage += TEXT("─────────────────────────────────");
 		return StatusMessage;
 	}
@@ -1604,6 +1604,9 @@ FString SClaudeEditorWidget::GenerateMCPStatusMessage() const
 			MissingTools.Add(ToolName);
 		}
 	}
+
+	// Always show the port the server is actually listening on
+	StatusMessage += FString::Printf(TEXT("  • Listening on http://localhost:%u\n"), MCPServer->GetPort());
 
 	if (MissingTools.Num() == 0)
 	{

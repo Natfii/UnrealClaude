@@ -1012,6 +1012,54 @@ bool FMCPTool_TaskSubmit_GetInfo::RunTest(const FString& Parameters)
 	TestTrue("Should have 'tool_name' parameter", bHasToolName);
 	TestTrue("Should have 'params' parameter", bHasParams);
 	TestTrue("Should have 'timeout_ms' parameter", bHasTimeout);
+	TestFalse("task_submit must not be marked read-only", Info.Annotations.bReadOnlyHint);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_TaskSubmit_RejectsHiddenTool,
+	"UnrealClaude.MCP.Tools.TaskSubmit.RejectsHiddenTool",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_TaskSubmit_RejectsHiddenTool::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("task_submit"));
+	TestNotNull("Tool should exist", Tool);
+	if (!Tool) return false;
+
+	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("tool_name"), TEXT("execute_script"));
+
+	FMCPToolResult Result = Tool->Execute(Params);
+	TestFalse("Hidden tools should not be callable through task_submit", Result.bSuccess);
+	TestTrue("Error should explain the hidden-tool restriction", Result.Message.Contains(TEXT("not available")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPTool_TaskSubmit_RejectsInvalidTimeout,
+	"UnrealClaude.MCP.Tools.TaskSubmit.RejectsInvalidTimeout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter
+)
+
+bool FMCPTool_TaskSubmit_RejectsInvalidTimeout::RunTest(const FString& Parameters)
+{
+	FMCPToolRegistry Registry;
+	IMCPTool* Tool = Registry.FindTool(TEXT("task_submit"));
+	TestNotNull("Tool should exist", Tool);
+	if (!Tool) return false;
+
+	TSharedRef<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("tool_name"), TEXT("get_level_actors"));
+	Params->SetNumberField(TEXT("timeout_ms"), -1);
+
+	FMCPToolResult Result = Tool->Execute(Params);
+	TestFalse("Negative timeout should be rejected", Result.bSuccess);
+	TestTrue("Error should mention timeout_ms", Result.Message.Contains(TEXT("timeout_ms")));
 
 	return true;
 }

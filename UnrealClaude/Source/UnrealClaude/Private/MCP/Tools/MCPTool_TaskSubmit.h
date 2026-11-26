@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "MCP/MCPToolBase.h"
 #include "MCP/MCPTaskQueue.h"
+#include "UnrealClaudeConstants.h"
 
 /**
  * MCP Tool: Submit a tool for async execution
@@ -49,7 +50,7 @@ public:
 			FMCPToolParameter(TEXT("timeout_ms"), TEXT("number"),
 				TEXT("Custom timeout in milliseconds (default: 120000 = 2 minutes)"), false, TEXT("120000"))
 		};
-		Info.Annotations = FMCPToolAnnotations::ReadOnly();
+		Info.Annotations = FMCPToolAnnotations::Modifying();
 		return Info;
 	}
 
@@ -67,6 +68,13 @@ public:
 			return Error.GetValue();
 		}
 
+		// Hidden / power-user tools must not be reachable via task_submit
+		// (single source of truth: UnrealClaudeConstants::HiddenTools).
+		if (UnrealClaudeConstants::HiddenTools::IsBlockedFromTaskSubmit(ToolName))
+		{
+			return FMCPToolResult::Error(TEXT("This tool is not available through task_submit"));
+		}
+
 		TSharedPtr<FJsonObject> ToolParams;
 		const TSharedPtr<FJsonObject>* ParamsObj;
 		if (Params->TryGetObjectField(TEXT("params"), ParamsObj))
@@ -78,7 +86,12 @@ public:
 			ToolParams = MakeShared<FJsonObject>();
 		}
 
-		uint32 TimeoutMs = static_cast<uint32>(ExtractOptionalNumber<int32>(Params, TEXT("timeout_ms"), 120000));
+		const int32 RequestedTimeoutMs = ExtractOptionalNumber<int32>(Params, TEXT("timeout_ms"), 120000);
+		if (RequestedTimeoutMs < 1000 || RequestedTimeoutMs > 600000)
+		{
+			return FMCPToolResult::Error(TEXT("timeout_ms must be between 1000 and 600000 milliseconds"));
+		}
+		const uint32 TimeoutMs = static_cast<uint32>(RequestedTimeoutMs);
 
 		FGuid TaskId = TaskQueue->SubmitTask(ToolName, ToolParams, TimeoutMs);
 

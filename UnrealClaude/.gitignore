@@ -1,4 +1,5 @@
-Binaries/
+# Plugin-local ignore. Keep Binaries/ if you ship prebuilt editor modules;
+# Intermediate/ is always generated.
 Intermediate/
 .claude-plugins/
 CLAUDE.md

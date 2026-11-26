@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "MCPToolBase.h"
 #include "HAL/ThreadSafeBool.h"
+#include "Containers/Ticker.h"
 
 /**
  * Status of an async MCP task
@@ -66,6 +67,15 @@ struct FMCPAsyncTask
 	/** Flag to request cancellation */
 	FThreadSafeBool bCancellationRequested;
 
+	/** Protects non-atomic state and result data. */
+	mutable FCriticalSection StateLock;
+
+	/** Event used while a task waits for game-thread execution. */
+	TSharedPtr<FEvent, ESPMode::ThreadSafe> GameThreadCompletionEvent;
+
+	/** Pending game-thread ticker callback, if one exists. */
+	FDelegateHandle GameThreadTickerHandle;
+
 	FMCPAsyncTask()
 		: Status(EMCPTaskStatus::Pending)
 		, Progress(-1)
@@ -104,6 +114,7 @@ struct FMCPAsyncTask
 	/** Convert task info to JSON for API responses */
 	TSharedPtr<FJsonObject> ToJson(bool bIncludeResult = false) const
 	{
+		FScopeLock StateScopeLock(&StateLock);
 		TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetStringField(TEXT("task_id"), TaskId.ToString());
 		Json->SetStringField(TEXT("tool_name"), ToolName);
@@ -126,8 +137,11 @@ struct FMCPAsyncTask
 		{
 			Json->SetStringField(TEXT("completed_at"), CompletedTime.ToIso8601());
 
-			FTimespan Duration = CompletedTime - StartedTime;
-			Json->SetNumberField(TEXT("duration_ms"), Duration.GetTotalMilliseconds());
+			if (StartedTime > FDateTime::MinValue())
+			{
+				FTimespan Duration = CompletedTime - StartedTime;
+				Json->SetNumberField(TEXT("duration_ms"), Duration.GetTotalMilliseconds());
+			}
 
 			if (bIncludeResult)
 			{

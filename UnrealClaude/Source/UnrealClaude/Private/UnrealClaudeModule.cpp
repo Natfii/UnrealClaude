@@ -1,6 +1,7 @@
 // Copyright Natali Caggiano. All Rights Reserved.
 
 #include "UnrealClaudeModule.h"
+#include "UnrealClaudeSettings.h"
 #include "UnrealClaudeCommands.h"
 #include "ClaudeEditorWidget.h"
 #include "ClaudeCodeRunner.h"
@@ -29,6 +30,8 @@ static const FName ClaudeTabName("ClaudeAssistant");
 
 void FUnrealClaudeModule::StartupModule()
 {
+	// Phase 10: This plugin is currently validated for Unreal Engine 5.7 only.
+	// See UNREALCLAUDE_ENGINE_VERSION_* in UnrealClaudeConstants.h before porting.
 	UE_LOG(LogUnrealClaude, Warning, TEXT("=== UnrealClaude BUILD 20260107-1450 THREAD_TESTS_DISABLED ==="));
 
 	FUnrealClaudeCommands::Register();
@@ -222,6 +225,27 @@ void FUnrealClaudeModule::UnregisterMenus()
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
 }
+
+uint32 FUnrealClaudeModule::GetMCPServerPort()
+{
+	const int32 DefaultPort = static_cast<int32>(UnrealClaudeConstants::MCPServer::DefaultPort);
+	int32 Port = DefaultPort;
+
+	if (const UUnrealClaudeSettings* Settings = GetDefault<UUnrealClaudeSettings>())
+	{
+		Port = Settings->MCPServerPort;
+	}
+
+	// Clamp to a safe user-port range. Invalid values fall back to the default.
+	if (Port < 1024 || Port > 65535)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("MCP Server Port setting %d is out of range (1024-65535). Using default %d."), Port, DefaultPort);
+		Port = DefaultPort;
+	}
+
+	return static_cast<uint32>(Port);
+}
+
 
 void FUnrealClaudeModule::StartMCPServer()
 {
